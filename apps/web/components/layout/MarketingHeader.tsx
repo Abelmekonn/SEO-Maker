@@ -18,7 +18,7 @@ export function MarketingHeader() {
 
   return (
     <header className="sticky top-0 z-30 bg-mkt-canvas/50 backdrop-blur-md">
-      <div className="mx-auto grid h-16 max-w-[1200px] grid-cols-[1fr_auto] items-center px-6 md:grid-cols-[1fr_auto_1fr]">
+      <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto] items-center  md:grid-cols-[1fr_auto_1fr]">
         <BrandMark inverted />
 
         <nav className="hidden items-center gap-8 md:flex">
@@ -59,7 +59,7 @@ export function MarketingHeader() {
           id="mobile-nav"
           className="border-t border-mkt-hairline px-6 py-4 md:hidden"
         >
-          <div className="mx-auto flex max-w-[1200px] flex-col gap-1">
+          <div className="mx-auto flex max-w-7xl flex-col gap-1">
             {nav.map((item) => (
               <Link
                 key={item.href}

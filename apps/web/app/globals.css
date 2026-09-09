@@ -26,6 +26,15 @@
   --color-mkt-muted: var(--mkt-ink-muted);
   --color-mkt-subtle: var(--mkt-ink-subtle);
   --color-primary-glow: var(--primary-glow);
+  --animate-marquee: mkt-marquee 48s linear infinite;
+  @keyframes mkt-marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
   --color-canvas: var(--canvas);
   --color-ink: var(--ink);
   --color-body: var(--body);
@@ -156,6 +165,10 @@
     color-scheme: light;
   }
 
+  html:has(.mkt-root) {
+    color-scheme: dark;
+  }
+
   body {
     @apply bg-canvas font-heading text-ink antialiased;
   }
@@ -166,6 +179,50 @@
   h4 {
     @apply font-heading font-semibold;
   }
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  html:has(.mkt-root),
+  html:has(.mkt-root) * {
+    scrollbar-color: var(--mkt-hairline) var(--mkt-canvas);
+    scrollbar-width: thin;
+  }
+}
+
+html:has(.mkt-root)::-webkit-scrollbar,
+html:has(.mkt-root) *::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+html:has(.mkt-root)::-webkit-scrollbar-track,
+html:has(.mkt-root) *::-webkit-scrollbar-track {
+  background: var(--mkt-canvas);
+}
+
+html:has(.mkt-root)::-webkit-scrollbar-thumb,
+html:has(.mkt-root) *::-webkit-scrollbar-thumb {
+  background-clip: padding-box;
+  background-color: var(--mkt-hairline);
+  border: 2px solid var(--mkt-canvas);
+  border-radius: 8px;
+}
+
+html:has(.mkt-root)::-webkit-scrollbar-thumb:hover,
+html:has(.mkt-root) *::-webkit-scrollbar-thumb:hover {
+  background-color: var(--mkt-ink-subtle);
+}
+
+html:has(.mkt-root)::-webkit-scrollbar-button,
+html:has(.mkt-root) *::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+html:has(.mkt-root)::-webkit-scrollbar-corner,
+html:has(.mkt-root) *::-webkit-scrollbar-corner {
+  background: var(--mkt-canvas);
 }
 
 @utility font-heading {

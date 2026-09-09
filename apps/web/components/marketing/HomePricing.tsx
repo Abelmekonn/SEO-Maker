@@ -1,131 +1,135 @@
-"use client";
-
-import { useState } from "react";
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { pricingCompare, pricingTiers } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
 
-const tiers = [
-  {
-    name: "Pro",
-    monthly: "10 pages",
-    yearly: "10 pages",
-    body: "Important pages, performance scope, and competitor entry.",
-    featured: true,
-    features: [
-      "10-page crawl",
-      "PageSpeed on selected pages",
-      "Manual competitors",
-      "AI title and meta drafts",
-    ],
-  },
-  {
-    name: "Agency",
-    monthly: "100 pages",
-    yearly: "100 pages",
-    body: "Larger sites. Recurring audits come later.",
-    featured: false,
-    features: [
-      "100-page crawl",
-      "Batch performance",
-      "Multiple projects",
-      "Scheduled audits later",
-    ],
-  },
-];
+function CellValue({ value }: { value: string | boolean }) {
+  if (value === true) {
+    return (
+      <span
+        className="inline-flex size-5 items-center justify-center rounded-full "
+        aria-label="Included"
+      >
+        <Check className="size-3 text-white" strokeWidth={2.5} />
+      </span>
+    );
+  }
+  if (value === false) {
+    return <span className="sr-only">Not included</span>;
+  }
+  return <span className="text-white">{value}</span>;
+}
 
 export function HomePricing() {
-  const [cycle, setCycle] = useState<"monthly" | "yearly">("monthly");
-
   return (
-    <section id="pricing" className="px-6 py-24">
+    <section id="pricing" className="px-6 ">
       <div className="mx-auto max-w-7xl">
-        <h2 className="text-center font-heading text-[32px] font-semibold tracking-[-1px] text-white md:text-[40px]">
+        <p className="text-center font-mono text-[12px] tracking-[0.16em] text-brand-orange">
+          PRICING
+        </p>
+        <h2 className="mt-4 text-center font-heading text-[32px] font-semibold tracking-[-1px] text-white md:text-[40px]">
           Plans by page count
         </h2>
-        <p className="mx-auto mt-4 max-w-xl text-center text-base leading-6 text-brand-silver">
-          Free is the homepage. Checkout is not in this slice.
-        </p>
-
-        <div className="mx-auto mt-8 flex w-fit items-center rounded-full border border-white/10 bg-black/30 p-1">
-          {(
-            [
-              ["monthly", "Monthly"],
-              ["yearly", "Yearly"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setCycle(value)}
-              className={cn(
-                "rounded-full px-4 py-1.5 font-mono text-[13px] font-medium",
-                cycle === value
-                  ? "bg-brand-orange text-brand-charcoal"
-                  : "text-brand-silver",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="mx-auto mt-12 grid max-w-3xl gap-4 md:grid-cols-2">
-          {tiers.map((tier) => (
+        <div className="mt-14 flex gap-4">
+          {pricingTiers.map((tier) => (
             <article
               key={tier.name}
               className={cn(
-                "flex flex-col rounded-xl border p-8",
+                "relative flex flex-col rounded-2xl border bg-mkt-surface/80 p-8 backdrop-blur-sm",
                 tier.featured
-                  ? "border-brand-orange/40 bg-[#1a1514] shadow-[0_0_48px_rgba(255,109,41,0.12)]"
-                  : "border-white/10 bg-[#1a1514]",
+                  ? "border-brand-orange/40 shadow-[0_0_64px_rgba(255,109,41,0.14)]"
+                  : "border-mkt-hairline",
               )}
             >
-              <h3 className="font-heading text-lg font-medium text-white">
-                {tier.name}
-              </h3>
-              <p className="mt-4 font-heading text-[36px] font-semibold tracking-[-1px] text-white">
-                {cycle === "monthly" ? tier.monthly : tier.yearly}
+              <div className="flex items-center gap-3">
+                <h3 className="font-heading text-lg font-medium text-white">
+                  {tier.name}
+                </h3>
+                {tier.badge ? (
+                  <span className="rounded-full border border-white/15 px-2.5 py-0.5 font-mono text-[11px] text-mkt-muted">
+                    {tier.badge}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-6 font-heading text-[36px] font-semibold tracking-[-1px] text-white">
+                {tier.price}
               </p>
-              <p className="mt-1 font-mono text-[12px] text-white/40">
-                {cycle === "yearly"
-                  ? "Yearly billing later"
-                  : "Per project, for now"}
+              <p className="mt-1 font-mono text-[12px] text-mkt-subtle">
+                {tier.cadence}
               </p>
-              <p className="mt-3 text-sm leading-6 text-brand-silver">
-                {tier.body}
-              </p>
+              <p className="mt-4 text-sm leading-6 text-mkt-muted">{tier.body}</p>
               <ul className="mt-8 flex flex-1 flex-col gap-3">
                 {tier.features.map((feature) => (
                   <li
                     key={feature}
                     className="flex items-start gap-2 text-sm text-white/85"
                   >
-                    <Check
-                      className={cn(
-                        "mt-0.5 size-4 shrink-0",
-                        tier.featured ? "text-brand-orange" : "text-white",
-                      )}
-                      aria-hidden
-                    />
+                    <Check className="mt-0.5 size-4 shrink-0 text-white" aria-hidden />
                     {feature}
                   </li>
                 ))}
               </ul>
-              <Button
-                asChild
-                variant={tier.featured ? "default" : "outline"}
-                className={
-                  tier.featured
-                    ? "mt-8"
-                    : "mt-8 border-white/15 bg-white/5 text-white"
-                }
-              >
-                <Link href="/dashboard">Start a project</Link>
+              <Button asChild className="mt-8">
+                <Link href="/dashboard">{tier.cta}</Link>
               </Button>
             </article>
           ))}
+        </div>
+
+        <div className="mt-24 overflow-x-auto">
+          <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
+            <colgroup>
+              <col className="w-[34%]" />
+              <col className="w-[22%]" />
+              <col className="w-[22%]" />
+              <col className="w-[22%]" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th className="border-b border-r border-mkt-hairline px-6 py-8 text-left align-bottom">
+                  <p className="font-heading text-[20px] font-medium tracking-[-0.6px] text-white">
+                    Compare plans
+                  </p>
+                  <p className="mt-2 text-base font-normal leading-6 text-brand-silver">
+                    Find one that is right for the site.
+                  </p>
+                </th>
+                {pricingTiers.map((tier) => (
+                  <th
+                    key={tier.name}
+                    className="border-b border-mkt-hairline px-6 py-8 text-center align-bottom last:border-r-0 [&:not(:last-child)]:border-r"
+                  >
+                    <p className="font-heading text-[20px] font-medium tracking-[-0.6px] text-white">
+                      {tier.name}
+                    </p>
+                    <Button asChild className="mt-2 rounded-full border-mkt-hairline">
+                      <Link href="/dashboard">{tier.cta}</Link>
+                    </Button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pricingCompare.map((row) => (
+                <tr key={row.label}>
+                  <th className="border-b border-r border-mkt-hairline px-6 py-6 text-left font-medium text-mkt-muted">
+                    {row.label}
+                  </th>
+                  {row.values.map((value, index) => (
+                    <td
+                      key={`${row.label}-${pricingTiers[index].name}`}
+                      className="border-b border-mkt-hairline px-6 py-6 text-center last:border-r-0 [&:not(:last-child)]:border-r"
+                    >
+                      <div className="flex justify-center">
+                        <CellValue value={value} />
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </section>
