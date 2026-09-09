@@ -12,7 +12,7 @@ export function HomeHero() {
         sizes="100vw"
         className="pointer-events-none object-cover object-bottom opacity-70"
       />
-      <div className="relative z-10 mx-auto mb-10 flex max-w-[720px] flex-col items-center justify-end text-center">
+      <div className="relative z-10 mx-auto mb-6 flex max-w-[720px] flex-col items-center justify-end text-center">
         <h1 className="mt-6 font-heading text-[40px] font-medium leading-[1.05] tracking-[-2px] text-white md:text-[64px] lg:text-[72px]">
           Audits that grow with the site
         </h1>
