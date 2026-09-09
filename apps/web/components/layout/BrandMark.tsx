@@ -17,7 +17,7 @@ export function BrandMark({
         inverted ? "text-white" : "text-brand-charcoal",
       )}
     >
-      <Image src="/logo.png" alt="Logo" width={100} height={100} className="w-14 h-14 rounded-full" />
+      <Image src="/logo.png" alt="SEO Maker" width={100} height={100} className="h-14 w-14 rounded-full" />
     </Link>
   );
 }

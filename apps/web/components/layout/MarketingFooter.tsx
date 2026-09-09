@@ -16,6 +16,9 @@ const resources = [
   { href: "/projects/demo", label: "Demo" },
 ];
 
+const footerLinkClass =
+  "inline-flex min-h-11 items-center text-sm hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none active:text-white";
+
 const contact = [
   { href: "/projects/new", label: "Start a project", icon: FolderPlus },
   { href: "/dashboard", label: "Open the dashboard", icon: LayoutDashboard },
@@ -39,7 +42,7 @@ export function MarketingFooter() {
           <ul className="mt-5 flex flex-col gap-3">
             {company.map((link) => (
               <li key={link.href}>
-                <Link href={link.href} className="text-sm active:text-white">
+                <Link href={link.href} className={footerLinkClass}>
                   {link.label}
                 </Link>
               </li>
@@ -54,7 +57,7 @@ export function MarketingFooter() {
           <ul className="mt-5 flex flex-col gap-3">
             {resources.map((link) => (
               <li key={link.href}>
-                <Link href={link.href} className="text-sm active:text-white">
+                <Link href={link.href} className={footerLinkClass}>
                   {link.label}
                 </Link>
               </li>
@@ -73,7 +76,7 @@ export function MarketingFooter() {
                 <li key={item.href}>
                   <Link
                     href={item.href}
-                    className="flex items-start gap-3 text-sm active:text-white"
+                    className="flex min-h-11 items-start gap-3 py-2 text-sm hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none active:text-white"
                   >
                     <Icon
                       className="mt-0.5 size-4 shrink-0 text-brand-orange"
@@ -89,8 +92,8 @@ export function MarketingFooter() {
       </div>
 
       <p className="mx-auto mt-16 max-w-7xl border-t border-mkt-hairline pt-6 text-center text-xs text-mkt-subtle">
-        © 2026 SEO Maker. Page-count limits are the cost control. Privacy and
-        terms come with auth.
+        © 2026 SEO Maker. Plans are limited by page count. We only store a URL
+        if you start a project.
       </p>
     </footer>
   );

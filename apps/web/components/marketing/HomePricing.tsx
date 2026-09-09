@@ -8,7 +8,7 @@ function CellValue({ value }: { value: string | boolean }) {
   if (value === true) {
     return (
       <span
-        className="inline-flex size-5 items-center justify-center rounded-full "
+        className="inline-flex size-5 items-center justify-center rounded-full"
         aria-label="Included"
       >
         <Check className="size-3 text-white" strokeWidth={2.5} />
@@ -23,15 +23,15 @@ function CellValue({ value }: { value: string | boolean }) {
 
 export function HomePricing() {
   return (
-    <section id="pricing" className="px-6 ">
+    <section id="pricing" className="px-6">
       <div className="mx-auto max-w-7xl">
         <p className="text-center font-mono text-[12px] tracking-[0.16em] text-brand-orange">
-          PRICING
+          Pricing
         </p>
         <h2 className="mt-4 text-center font-heading text-[32px] font-semibold tracking-[-1px] text-white md:text-[40px]">
           Plans by page count
         </h2>
-        <div className="mt-14 flex gap-4">
+        <div className="mt-14 flex flex-col gap-4 md:flex-row">
           {pricingTiers.map((tier) => (
             <article
               key={tier.name}
@@ -52,7 +52,10 @@ export function HomePricing() {
                   </span>
                 ) : null}
               </div>
-              <p className="mt-6 font-heading text-[36px] font-semibold tracking-[-1px] text-white">
+              <p className="mt-6 font-mono text-[12px] text-mkt-subtle">
+                Included pages
+              </p>
+              <p className="font-heading text-[36px] font-semibold tracking-[-1px] text-white">
                 {tier.price}
               </p>
               <p className="mt-1 font-mono text-[12px] text-mkt-subtle">
@@ -70,7 +73,7 @@ export function HomePricing() {
                   </li>
                 ))}
               </ul>
-              <Button asChild className="mt-8">
+              <Button asChild className="mt-8 h-11">
                 <Link href="/dashboard">{tier.cta}</Link>
               </Button>
             </article>
@@ -87,7 +90,7 @@ export function HomePricing() {
             </colgroup>
             <thead>
               <tr>
-                <th className="border-b border-r border-mkt-hairline px-6 py-8 text-left align-bottom">
+                <th className="sticky left-0 z-10 border-b border-r border-mkt-hairline bg-mkt-canvas px-6 py-8 text-left align-bottom">
                   <p className="font-heading text-[20px] font-medium tracking-[-0.6px] text-white">
                     Compare plans
                   </p>
@@ -103,7 +106,7 @@ export function HomePricing() {
                     <p className="font-heading text-[20px] font-medium tracking-[-0.6px] text-white">
                       {tier.name}
                     </p>
-                    <Button asChild className="mt-2 rounded-full border-mkt-hairline">
+                    <Button asChild className="mt-2 h-11 rounded-full border-mkt-hairline">
                       <Link href="/dashboard">{tier.cta}</Link>
                     </Button>
                   </th>
@@ -113,7 +116,7 @@ export function HomePricing() {
             <tbody>
               {pricingCompare.map((row) => (
                 <tr key={row.label}>
-                  <th className="border-b border-r border-mkt-hairline px-6 py-6 text-left font-medium text-mkt-muted">
+                  <th className="sticky left-0 z-10 border-b border-r border-mkt-hairline bg-mkt-canvas px-6 py-6 text-left font-medium text-mkt-muted">
                     {row.label}
                   </th>
                   {row.values.map((value, index) => (

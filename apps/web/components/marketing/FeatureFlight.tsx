@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import {
   ChartMock,
   GapsMock,
@@ -8,6 +8,7 @@ import {
   PagesMock,
   ScheduleMock,
 } from "@/components/marketing/feature-mocks";
+import { cn } from "@/lib/utils";
 
 type Scene = {
   id: string;
@@ -15,7 +16,8 @@ type Scene = {
   body: string;
   points: string[];
   tags: string[];
-  visual: ReactNode;
+  note?: string;
+  Visual: ComponentType;
   scroll: number;
   linger: number;
 };
@@ -31,7 +33,7 @@ const SCENES: Scene[] = [
       "Approved or review — no extra dashboard",
     ],
     tags: ["Homepage first", "On-page checklist"],
-    visual: <PagesMock />,
+    Visual: PagesMock,
     scroll: 1.55,
     linger: 0.45,
   },
@@ -40,12 +42,12 @@ const SCENES: Scene[] = [
     title: "Core Web Vitals stored",
     body: "Performance is stored per page. You pick the PageSpeed scope so the run stays cheap.",
     points: [
-      "LCP, CLS, and INP saved on the page",
+      "LCP (main content paint), CLS (layout shift), and INP (input delay)",
       "Homepage, important pages, or all pages",
       "Readable notes on the raw PageSpeed output",
     ],
     tags: ["Scoped PageSpeed", "LCP · CLS · INP"],
-    visual: <ChartMock />,
+    Visual: ChartMock,
     scroll: 1.5,
     linger: 0.4,
   },
@@ -59,7 +61,8 @@ const SCENES: Scene[] = [
       "Re-run the table after you ship",
     ],
     tags: ["Claude drafts", "You ship it"],
-    visual: <GatewayMock />,
+    note: "Suggestions can be wrong. Edit before you publish. Audits work without drafts.",
+    Visual: GatewayMock,
     scroll: 1.5,
     linger: 0.4,
   },
@@ -73,21 +76,21 @@ const SCENES: Scene[] = [
       "Add URLs when you are ready",
     ],
     tags: ["Expand later", "Page-count plans"],
-    visual: <ScheduleMock />,
+    Visual: ScheduleMock,
     scroll: 1.5,
     linger: 0.4,
   },
   {
     id: "gaps",
     title: "Competitor page gaps",
-    body: "Enter a domain by hand. See pages they have that you do not. SERP discovery comes later.",
+    body: "Enter a domain by hand. See pages they have that you do not. Search-result discovery comes later.",
     points: [
       "Manual competitor domains first",
       "Pages they rank that you skip",
       "Kept next to your own table",
     ],
     tags: ["Manual competitors", "Gaps, not vanity"],
-    visual: <GapsMock />,
+    Visual: GapsMock,
     scroll: 1.6,
     linger: 0.45,
   },
@@ -117,24 +120,80 @@ function sceneWindow(index: number) {
   return { start, end: start + SCENES[index].scroll };
 }
 
-export function FeatureFlight() {
+function SceneCopy({ scene }: { scene: Scene }) {
+  return (
+    <div className="max-w-lg">
+      <p className="font-mono text-[12px] tracking-[0.16em] text-brand-orange">
+        What we do
+      </p>
+      <h2 className="mt-4 font-heading text-[32px] font-semibold tracking-[-1px] text-white md:text-[40px]">
+        {scene.title}
+      </h2>
+      <p className="mt-4 text-base leading-6 text-mkt-muted">{scene.body}</p>
+      <ul className="mt-5 flex flex-col gap-2.5">
+        {scene.points.map((point) => (
+          <li key={point} className="flex gap-3 text-sm leading-6 text-white/85">
+            <span
+              className="mt-2 size-1.5 shrink-0 rounded-full bg-brand-orange"
+              aria-hidden
+            />
+            {point}
+          </li>
+        ))}
+      </ul>
+      {scene.note ? (
+        <p className="mt-4 text-sm leading-6 text-mkt-subtle">{scene.note}</p>
+      ) : null}
+      <p className="mt-6 font-mono text-[12px] leading-5 text-mkt-subtle">
+        {scene.tags.join(" · ")}
+      </p>
+    </div>
+  );
+}
+
+function SceneVisual({ Visual }: { Visual: ComponentType }) {
+  return (
+    <div className="h-[min(58vh,460px)] min-h-[280px] overflow-hidden rounded-2xl border border-white/10 bg-mkt-canvas shadow-[0_24px_80px_rgba(0,0,0,0.55),0_0_80px_rgba(255,109,41,0.10)] ring-1 ring-white/5">
+      <Visual />
+    </div>
+  );
+}
+
+function FeatureStack() {
+  return (
+    <section aria-label="What we do" className="space-y-24 px-6 py-16">
+      {SCENES.map((scene) => (
+        <article
+          key={scene.id}
+          className="mx-auto grid w-full max-w-7xl items-center gap-10 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
+        >
+          <SceneCopy scene={scene} />
+          <SceneVisual Visual={scene.Visual} />
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function FeatureFlightDesktop() {
   const rootRef = useRef<HTMLElement>(null);
   const [y, setY] = useState(0);
   const [vh, setVh] = useState(800);
-  const [reduce, setReduce] = useState(false);
+  const [announce, setAnnounce] = useState("");
 
   useEffect(() => {
-    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const applyReduce = () => setReduce(motion.matches);
-    applyReduce();
-    motion.addEventListener("change", applyReduce);
-
     let ticking = false;
     const measure = () => {
       const root = rootRef.current;
       if (!root) return;
       setVh(window.innerHeight);
-      setY(clamp(-root.getBoundingClientRect().top, 0, root.offsetHeight - window.innerHeight));
+      setY(
+        clamp(
+          -root.getBoundingClientRect().top,
+          0,
+          root.offsetHeight - window.innerHeight,
+        ),
+      );
       ticking = false;
     };
     const onScroll = () => {
@@ -147,13 +206,10 @@ export function FeatureFlight() {
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
     return () => {
-      motion.removeEventListener("change", applyReduce);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
     };
   }, []);
-
-  if (reduce) return null;
 
   const progress = vh ? y / vh : 0;
   const fade = 0.14;
@@ -162,19 +218,33 @@ export function FeatureFlight() {
     if (progress >= sceneWindow(i).start) active = i;
   });
 
+  function jumpTo(index: number) {
+    const root = rootRef.current;
+    if (!root) return;
+    const { start } = sceneWindow(index);
+    const top = root.offsetTop + start * window.innerHeight;
+    window.scrollTo({ top, behavior: "auto" });
+    setAnnounce(SCENES[index].title);
+  }
+
   return (
     <section
       ref={rootRef}
+      aria-label="What we do"
       className="relative"
       style={{ height: `${TOTAL_W * 100 + 100}vh` }}
     >
+      <div className="sr-only" aria-live="polite">
+        {announce}
+      </div>
       <div className="sticky top-0 flex h-screen flex-col overflow-hidden bg-mkt-canvas">
-        
-
         <div className="relative mx-auto flex h-full w-full max-w-7xl items-center px-6">
           {SCENES.map((scene, i) => {
             const { start, end } = sceneWindow(i);
-            const local = lingerEase(clamp((progress - start) / (end - start)), scene.linger);
+            const local = lingerEase(
+              clamp((progress - start) / (end - start)),
+              scene.linger,
+            );
             const before = progress < start;
             const after = progress > end;
             let outside = 0;
@@ -187,11 +257,15 @@ export function FeatureFlight() {
             let copyOpacity = 0;
             if (i === 0) copyOpacity = after ? 0 : smooth(1 - local / 0.62);
             else if (i === N - 1) copyOpacity = before ? 0 : smooth(local / 0.4);
-            else copyOpacity = before || after ? 0 : smooth(1 - Math.abs(local - 0.5) / 0.5);
+            else
+              copyOpacity = before || after
+                ? 0
+                : smooth(1 - Math.abs(local - 0.5) / 0.5);
 
             return (
               <article
                 key={scene.id}
+                aria-hidden={i !== active}
                 className="pointer-events-none absolute inset-0 flex items-center px-6"
                 style={{
                   opacity,
@@ -200,52 +274,20 @@ export function FeatureFlight() {
               >
                 <div className="mx-auto grid w-full max-w-7xl items-center gap-10 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
                   <div
-                    className="max-w-lg"
+                    className="pointer-events-auto"
                     style={{
                       opacity: copyOpacity,
                       transform: `translateY(${(0.5 - local) * 4}vh)`,
                     }}
                   >
-                    <p className="font-mono text-[12px] tracking-[0.16em] text-brand-orange">
-                      WHAT WE DO 
-                    </p>
-                    <h2 className="mt-4 font-heading text-[32px] font-semibold tracking-[-1px] text-white md:text-[40px]">
-                      {scene.title}
-                    </h2>
-                    <p className="mt-4 text-base leading-6 text-mkt-muted">{scene.body}</p>
-                    <ul className="mt-5 flex flex-col gap-2.5">
-                      {scene.points.map((point) => (
-                        <li
-                          key={point}
-                          className="flex gap-3 text-sm leading-6 text-white/85"
-                        >
-                          <span
-                            className="mt-2 size-1.5 shrink-0 rounded-full bg-brand-orange"
-                            aria-hidden
-                          />
-                          {point}
-                        </li>
-                      ))}
-                    </ul>
-                    <ul className="mt-6 flex flex-wrap gap-2">
-                      {scene.tags.map((tag) => (
-                        <li
-                          key={tag}
-                          className="rounded-full border border-brand-orange/40 px-3 py-1 font-mono text-[12px] text-brand-orange"
-                        >
-                          {tag}
-                        </li>
-                      ))}
-                    </ul>
+                    <SceneCopy scene={scene} />
                   </div>
                   <div
-                    className="overflow-hidden rounded-2xl border border-white/10 bg-mkt-canvas shadow-[0_24px_80px_rgba(0,0,0,0.55),0_0_80px_rgba(255,109,41,0.10)] ring-1 ring-white/5"
                     style={{
                       transform: `translateY(${rise}vh) scale(${scale})`,
-                      height: "min(58vh, 460px)",
                     }}
                   >
-                    {scene.visual}
+                    <SceneVisual Visual={scene.Visual} />
                   </div>
                 </div>
               </article>
@@ -253,8 +295,57 @@ export function FeatureFlight() {
           })}
         </div>
 
-       
+        <nav
+          aria-label="Feature scenes"
+          className="absolute top-1/2 right-4 z-20 flex -translate-y-1/2 flex-col gap-1 md:right-8"
+        >
+          {SCENES.map((scene, i) => (
+            <button
+              key={scene.id}
+              type="button"
+              aria-label={scene.title}
+              aria-current={i === active ? "true" : undefined}
+              className="flex size-7 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+              onClick={() => jumpTo(i)}
+            >
+              <span
+                className={cn(
+                  "size-2.5 rounded-full border",
+                  i === active
+                    ? "border-white bg-white"
+                    : "border-white/45 bg-transparent hover:border-white",
+                )}
+                aria-hidden
+              />
+            </button>
+          ))}
+        </nav>
       </div>
     </section>
+  );
+}
+
+export function FeatureFlight() {
+  const [reduce, setReduce] = useState(false);
+
+  useEffect(() => {
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const applyReduce = () => setReduce(motion.matches);
+    applyReduce();
+    motion.addEventListener("change", applyReduce);
+    return () => motion.removeEventListener("change", applyReduce);
+  }, []);
+
+  if (reduce) return <FeatureStack />;
+
+  return (
+    <>
+      <div className="md:hidden">
+        <FeatureStack />
+      </div>
+      <div className="hidden md:block">
+        <FeatureFlightDesktop />
+      </div>
+    </>
   );
 }

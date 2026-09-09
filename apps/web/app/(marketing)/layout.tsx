@@ -9,7 +9,9 @@ export default function MarketingLayout({
   return (
     <div className="mkt-root flex min-h-screen flex-col bg-mkt-canvas text-mkt-ink">
       <MarketingHeader />
-      <main className="flex-1">{children}</main>
+      <main id="main-content" className="flex-1 focus:outline-none" tabIndex={-1}>
+        {children}
+      </main>
       <MarketingFooter />
     </div>
   );
