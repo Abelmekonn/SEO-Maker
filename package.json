@@ -4,7 +4,12 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint"
+    "lint": "turbo run lint",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter @seo-maker/db generate",
+    "db:migrate": "pnpm --filter @seo-maker/db migrate",
+    "db:deploy": "pnpm db:up && pnpm --filter @seo-maker/db migrate:deploy"
   },
   "devDependencies": {
     "turbo": "^2.5.6",

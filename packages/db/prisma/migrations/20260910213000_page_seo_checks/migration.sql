@@ -1,0 +1,16 @@
+ALTER TABLE "Page"
+ADD COLUMN     "finalUrl" TEXT,
+ADD COLUMN     "isHttps" BOOLEAN,
+ADD COLUMN     "statusCode" INTEGER,
+ADD COLUMN     "h2Count" INTEGER,
+ADD COLUMN     "canonicalUrl" TEXT,
+ADD COLUMN     "imageCount" INTEGER,
+ADD COLUMN     "missingAlt" INTEGER,
+ADD COLUMN     "internalLinks" INTEGER,
+ADD COLUMN     "schemaCount" INTEGER,
+ADD COLUMN     "robotsTxtUrl" TEXT,
+ADD COLUMN     "robotsOk" BOOLEAN,
+ADD COLUMN     "sitemapUrl" TEXT,
+ADD COLUMN     "hasSitemap" BOOLEAN,
+ADD COLUMN     "xRobotsTag" TEXT,
+ADD COLUMN     "indexable" BOOLEAN;

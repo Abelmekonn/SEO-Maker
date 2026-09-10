@@ -1,15 +1,20 @@
-import {
-  PlaceholderCard,
-  PlaceholderPage,
-} from "@/components/layout/PlaceholderPage";
+import { UrlIntakeForm } from "@/components/project/UrlIntakeForm";
+import { PageHeader, Panel } from "@/components/dashboard/shell";
 
-export default function NewProjectPage() {
+export default async function NewProjectPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ url?: string }>;
+}) {
+  const { url } = await searchParams;
+
   return (
-    <PlaceholderCard>
-      <PlaceholderPage
-        title="New project"
-        description="URL intake ships in the next slice. No crawler is wired yet."
+    <Panel>
+      <PageHeader
+        title="Start with a URL"
+        description="The first pass is the homepage. You add more pages when that pass is useful."
       />
-    </PlaceholderCard>
+      <UrlIntakeForm initialUrl={url ?? ""} />
+    </Panel>
   );
 }

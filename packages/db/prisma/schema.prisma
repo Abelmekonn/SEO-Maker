@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          String       @id @default(cuid())
+  userId      String
+  rootUrl     String
+  name        String
+  maxPages    Int          @default(1)
+  status      String       @default("pending")
+  perfStatus  String       @default("idle")
+  perfError   String?
+  perfRunAt   DateTime?
+  createdAt   DateTime     @default(now())
+  pages       Page[]
+  competitors Competitor[]
+
+  @@index([userId])
+}
+
+model Page {
+  id            String              @id @default(cuid())
+  projectId     String
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url           String
+  finalUrl      String?
+  isHttps       Boolean?
+  statusCode    Int?
+  pageType      String?
+  title         String?
+  metaDesc      String?
+  h1            String?
+  h2Count       Int?
+  canonicalUrl  String?
+  wordCount     Int?
+  imageCount    Int?
+  missingAlt    Int?
+  internalLinks Int?
+  schemaCount   Int?
+  robotsTxtUrl  String?
+  robotsOk      Boolean?
+  sitemapUrl    String?
+  hasSitemap    Boolean?
+  xRobotsTag    String?
+  indexable     Boolean?
+  seoSuggestion Json?
+  status        String              @default("pending")
+  createdAt     DateTime            @default(now())
+  performance   PerformanceAudit[]
+
+  @@index([projectId])
+}
+
+model PerformanceAudit {
+  id            String   @id @default(cuid())
+  pageId        String
+  page          Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  strategy      String
+  performance   Float?
+  accessibility Float?
+  bestPractices Float?
+  seo           Float?
+  fcp           Float?
+  lcp           Float?
+  cls           Float?
+  tbt           Float?
+  inp           Float?
+  rawData       Json?
+  opportunities Json?
+  diagnostics   Json?
+  createdAt     DateTime @default(now())
+
+  @@index([pageId])
+}
+
+model Competitor {
+  id          String           @id @default(cuid())
+  projectId   String
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  domain      String
+  name        String?
+  source      String
+  relevance   Float?
+  pageCount   Int              @default(0)
+  seoScore    Float?
+  performance Float?
+  status      String
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  pages       CompetitorPage[]
+
+  @@unique([projectId, domain])
+  @@index([projectId])
+}
+
+model CompetitorPage {
+  id              String     @id @default(cuid())
+  competitorId    String
+  competitor      Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  url             String
+  title           String?
+  metaDescription String?
+  h1              String?
+  wordCount       Int?
+  internalLinks   Int?
+  imageCount      Int?
+  schema          Json?
+  seoScore        Float?
+  rawData         Json?
+  createdAt       DateTime   @default(now())
+
+  @@index([competitorId])
+}

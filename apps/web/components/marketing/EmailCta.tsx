@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { normalizeSiteUrl } from "@/lib/site-url";
 
 export function EmailCta({
   id = "site-url",
@@ -16,26 +17,15 @@ export function EmailCta({
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const value = String(new FormData(event.currentTarget).get("url") ?? "").trim();
-    if (!value) {
-      setError("Enter a site URL to start a project.");
-      return;
-    }
-
-    const href = /^https?:\/\//i.test(value) ? value : `https://${value}`;
-    try {
-      const parsed = new URL(href);
-      if (!parsed.hostname.includes(".")) {
-        setError("Enter a full site URL, like example.com.");
-        return;
-      }
-    } catch {
-      setError("Enter a valid site URL, like example.com.");
+    const value = String(new FormData(event.currentTarget).get("url") ?? "");
+    const normalized = normalizeSiteUrl(value);
+    if ("error" in normalized) {
+      setError(normalized.error);
       return;
     }
 
     setError("");
-    router.push(`/projects/new?url=${encodeURIComponent(href)}`);
+    router.push(`/projects/new?url=${encodeURIComponent(normalized.href)}`);
   }
 
   return (

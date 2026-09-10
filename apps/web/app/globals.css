@@ -165,12 +165,47 @@
     color-scheme: light;
   }
 
-  html:has(.mkt-root) {
+  html:has(.mkt-root),
+  html:has(.dash-root) {
     color-scheme: dark;
   }
 
-  .mkt-root {
+  .mkt-root,
+  .dash-root {
     color-scheme: dark;
+  }
+
+  .dash-root {
+    --canvas: var(--mkt-canvas);
+    --ink: var(--mkt-ink);
+    --body: var(--mkt-ink-muted);
+    --muted-soft: var(--mkt-ink-subtle);
+    --hairline: var(--mkt-hairline);
+    --hairline-soft: var(--mkt-hairline);
+    --surface-soft: var(--mkt-surface-1);
+    --surface-card: var(--mkt-surface-2);
+    --surface-strong: var(--mkt-hairline);
+    --background: var(--mkt-canvas);
+    --foreground: var(--mkt-ink);
+    --card: var(--mkt-surface-1);
+    --card-foreground: var(--mkt-ink);
+    --popover: var(--mkt-surface-1);
+    --popover-foreground: var(--mkt-ink);
+    --secondary: var(--mkt-surface-2);
+    --secondary-foreground: var(--mkt-ink);
+    --muted: var(--mkt-surface-1);
+    --muted-foreground: var(--mkt-ink-muted);
+    --accent: var(--mkt-surface-2);
+    --accent-foreground: var(--mkt-ink);
+    --border: var(--mkt-hairline);
+    --input: var(--mkt-hairline);
+    --sidebar: var(--mkt-canvas);
+    --sidebar-foreground: var(--mkt-ink);
+    --sidebar-accent: var(--mkt-surface-1);
+    --sidebar-accent-foreground: var(--mkt-ink);
+    --sidebar-border: var(--mkt-hairline);
+    --warn: #f2b84b;
+    --good: #3ecf8e;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -180,7 +215,8 @@
   }
 
   @media (prefers-contrast: more) {
-    .mkt-root {
+    .mkt-root,
+    .dash-root {
       --mkt-ink-subtle: #c8c8c8;
       --mkt-hairline: #5a5a5a;
     }
@@ -188,6 +224,12 @@
 
   body {
     @apply bg-canvas font-heading text-ink antialiased;
+  }
+
+  html:has(.mkt-root) body,
+  html:has(.dash-root) body {
+    background: var(--mkt-canvas);
+    color: var(--mkt-ink);
   }
 
   h1,
@@ -200,25 +242,33 @@
 
 @supports not selector(::-webkit-scrollbar) {
   html:has(.mkt-root),
-  html:has(.mkt-root) * {
+  html:has(.mkt-root) *,
+  html:has(.dash-root),
+  html:has(.dash-root) * {
     scrollbar-color: var(--mkt-hairline) var(--mkt-canvas);
     scrollbar-width: thin;
   }
 }
 
 html:has(.mkt-root)::-webkit-scrollbar,
-html:has(.mkt-root) *::-webkit-scrollbar {
+html:has(.mkt-root) *::-webkit-scrollbar,
+html:has(.dash-root)::-webkit-scrollbar,
+html:has(.dash-root) *::-webkit-scrollbar {
   height: 8px;
   width: 8px;
 }
 
 html:has(.mkt-root)::-webkit-scrollbar-track,
-html:has(.mkt-root) *::-webkit-scrollbar-track {
+html:has(.mkt-root) *::-webkit-scrollbar-track,
+html:has(.dash-root)::-webkit-scrollbar-track,
+html:has(.dash-root) *::-webkit-scrollbar-track {
   background: var(--mkt-canvas);
 }
 
 html:has(.mkt-root)::-webkit-scrollbar-thumb,
-html:has(.mkt-root) *::-webkit-scrollbar-thumb {
+html:has(.mkt-root) *::-webkit-scrollbar-thumb,
+html:has(.dash-root)::-webkit-scrollbar-thumb,
+html:has(.dash-root) *::-webkit-scrollbar-thumb {
   background-clip: padding-box;
   background-color: var(--mkt-hairline);
   border: 2px solid var(--mkt-canvas);
@@ -226,19 +276,25 @@ html:has(.mkt-root) *::-webkit-scrollbar-thumb {
 }
 
 html:has(.mkt-root)::-webkit-scrollbar-thumb:hover,
-html:has(.mkt-root) *::-webkit-scrollbar-thumb:hover {
+html:has(.mkt-root) *::-webkit-scrollbar-thumb:hover,
+html:has(.dash-root)::-webkit-scrollbar-thumb:hover,
+html:has(.dash-root) *::-webkit-scrollbar-thumb:hover {
   background-color: var(--mkt-ink-subtle);
 }
 
 html:has(.mkt-root)::-webkit-scrollbar-button,
-html:has(.mkt-root) *::-webkit-scrollbar-button {
+html:has(.mkt-root) *::-webkit-scrollbar-button,
+html:has(.dash-root)::-webkit-scrollbar-button,
+html:has(.dash-root) *::-webkit-scrollbar-button {
   display: none;
   height: 0;
   width: 0;
 }
 
 html:has(.mkt-root)::-webkit-scrollbar-corner,
-html:has(.mkt-root) *::-webkit-scrollbar-corner {
+html:has(.mkt-root) *::-webkit-scrollbar-corner,
+html:has(.dash-root)::-webkit-scrollbar-corner,
+html:has(.dash-root) *::-webkit-scrollbar-corner {
   background: var(--mkt-canvas);
 }
 

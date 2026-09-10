@@ -1,7 +1,7 @@
 const faqs = [
   {
     q: "What can I do today?",
-    a: "Open the dashboard and walk through a project. Sign-in, the database, and the crawler are not connected yet.",
+    a: "Sign in, add a URL, and we crawl the homepage. Title, meta, H1, and word count land on the page row.",
   },
   {
     q: "How do I start a project?",

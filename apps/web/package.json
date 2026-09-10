@@ -9,8 +9,13 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@clerk/nextjs": "^6.33.3",
+    "@prisma/client": "^6.19.3",
+    "@seo-maker/db": "workspace:*",
+    "bullmq": "^5.61.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.2.4",
+    "ioredis": "^5.8.1",
     "lucide-react": "^1.40.0",
     "next": "15.5.25",
     "radix-ui": "^1.6.7",
