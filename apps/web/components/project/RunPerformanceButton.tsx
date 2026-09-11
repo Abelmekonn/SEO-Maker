@@ -7,12 +7,16 @@ import { Button } from "@/components/ui/button";
 
 export function RunPerformanceButton({
   projectId,
+  pageIds,
   active = false,
   hasResults = false,
+  disabled = false,
 }: {
   projectId: string;
+  pageIds: string[];
   active?: boolean;
   hasResults?: boolean;
+  disabled?: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -23,6 +27,8 @@ export function RunPerformanceButton({
     setError("");
     const response = await fetch(`/api/projects/${projectId}/performance`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pageIds }),
     });
     const data = (await response.json().catch(() => null)) as { error?: string } | null;
     setPending(false);
@@ -34,6 +40,7 @@ export function RunPerformanceButton({
   }
 
   const busy = pending || active;
+  const count = pageIds.length;
 
   return (
     <div className="flex flex-col items-start gap-2">
@@ -41,7 +48,7 @@ export function RunPerformanceButton({
         type="button"
         variant={hasResults ? "outline" : "default"}
         className="h-11 w-fit"
-        disabled={busy}
+        disabled={busy || disabled || count === 0}
         aria-busy={busy}
         onClick={onClick}
       >
@@ -51,8 +58,12 @@ export function RunPerformanceButton({
           : active
             ? "Running PageSpeed"
             : hasResults
-              ? "Run again"
-              : "Run PageSpeed"}
+              ? count > 1
+                ? `Run again (${count})`
+                : "Run again"
+              : count > 1
+                ? `Run PageSpeed (${count})`
+                : "Run PageSpeed"}
       </Button>
       {error ? (
         <p role="alert" className="text-sm text-bad">

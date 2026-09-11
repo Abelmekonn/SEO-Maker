@@ -4,6 +4,16 @@ export type Rating = "good" | "warn" | "bad" | "none";
 
 export const PERF_ACTIVE = new Set(["queued", "running"]);
 
+export function latestStrategy(
+  audits: PerformanceAudit[],
+  pageId: string,
+  strategy: "mobile" | "desktop",
+) {
+  return (
+    audits.find((audit) => audit.pageId === pageId && audit.strategy === strategy) ?? null
+  );
+}
+
 export function scoreRating(score: number | null | undefined): Rating {
   if (score == null) return "none";
   if (score >= 90) return "good";

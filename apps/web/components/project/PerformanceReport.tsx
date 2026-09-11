@@ -43,11 +43,17 @@ const ratingLabel: Record<Rating, string> = {
 export function PerformanceStatus({
   status,
   error,
+  done = 0,
+  total = 0,
 }: {
   status: string;
   error: string | null;
+  done?: number;
+  total?: number;
 }) {
   if (status === "queued" || status === "running") {
+    const scoped = total > 1;
+    const pageLabel = scoped ? ` Page ${Math.min(done + 1, total)} of ${total}.` : "";
     return (
       <div
         role="status"
@@ -56,8 +62,10 @@ export function PerformanceStatus({
         <LoaderCircle className="size-4 shrink-0 animate-spin text-primary" aria-hidden />
         <p className="text-sm text-ink">
           {status === "queued"
-            ? "Queued. The worker will pick this up in a moment."
-            : "Running PageSpeed on mobile, then desktop. This takes about a minute."}
+            ? scoped
+              ? `Queued. ${total} pages. The worker will pick this up in a moment.`
+              : "Queued. The worker will pick this up in a moment."
+            : `Running PageSpeed on mobile, then desktop.${pageLabel} This takes about a minute per page.`}
         </p>
       </div>
     );

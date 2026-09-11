@@ -11,17 +11,27 @@ export type CrawlHomepageJob = {
   url: string;
 };
 
-export type RunPerformanceJob = CrawlHomepageJob;
+export type PerfPageTarget = {
+  pageId: string;
+  url: string;
+};
+
+export type RunPerformanceJob = {
+  projectId: string;
+  pages: PerfPageTarget[];
+};
+
+type QueueJob = CrawlHomepageJob | RunPerformanceJob;
 
 function redisUrl() {
   return process.env.REDIS_URL ?? "redis://localhost:6380";
 }
 
-let crawlQueue: Queue<CrawlHomepageJob> | null = null;
+let crawlQueue: Queue<QueueJob> | null = null;
 
 function getCrawlQueue() {
   if (!crawlQueue) {
-    crawlQueue = new Queue<CrawlHomepageJob>(CRAWL_QUEUE, {
+    crawlQueue = new Queue<QueueJob>(CRAWL_QUEUE, {
       connection: new IORedis(redisUrl(), { maxRetriesPerRequest: null }),
     });
   }

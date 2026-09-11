@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@seo-maker/db";
+import { prisma, writePerfProgress } from "@seo-maker/db";
+import { resolvePerfTargets } from "@/lib/perf-scope";
+import { getAccountForUser } from "@/lib/plan";
+import { PERF_ACTIVE } from "@/lib/performance";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { enqueuePerformanceAudit } from "@/lib/queue";
-import { findHomepage } from "@/lib/site-url";
-
-const ACTIVE = new Set(["queued", "running"]);
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const userId = await requireUserId();
@@ -16,34 +16,59 @@ export async function POST(
   }
 
   const { id } = await params;
-  const project = await getProjectForUser(id, userId);
+  const [project, account] = await Promise.all([
+    getProjectForUser(id, userId),
+    getAccountForUser(userId),
+  ]);
 
   if (!project) {
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
-  const homepage = findHomepage(project.pages, project.rootUrl);
-  if (!homepage) {
-    return NextResponse.json({ error: "No homepage to test." }, { status: 400 });
-  }
-
-  if (ACTIVE.has(project.perfStatus)) {
+  if (PERF_ACTIVE.has(project.perfStatus)) {
     return NextResponse.json(
       { error: "A PageSpeed run is already in progress." },
       { status: 409 },
     );
   }
 
+  const body = (await request.json().catch(() => null)) as { pageIds?: unknown } | null;
+  const requestedIds = Array.isArray(body?.pageIds)
+    ? body.pageIds.filter((value): value is string => typeof value === "string")
+    : undefined;
+
+  const maxPages = Math.max(project.maxPages, account.limits.maxPages);
+  const resolved = resolvePerfTargets({
+    plan: account.plan,
+    maxPages,
+    pages: project.pages,
+    rootUrl: project.rootUrl,
+    requestedIds,
+  });
+
+  if ("error" in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: 400 });
+  }
+
+  const { targets } = resolved;
+
   await prisma.project.update({
     where: { id: project.id },
-    data: { perfStatus: "queued", perfError: null },
+    data: {
+      perfStatus: "queued",
+      perfError: null,
+    },
+  });
+  await writePerfProgress(prisma, project.id, {
+    done: 0,
+    total: targets.length,
+    pageIds: targets.map((target) => target.pageId),
   });
 
   try {
     await enqueuePerformanceAudit({
       projectId: project.id,
-      pageId: homepage.id,
-      url: homepage.finalUrl ?? homepage.url,
+      pages: targets,
     });
   } catch (error) {
     console.error("Failed to enqueue performance run", error);
@@ -57,5 +82,5 @@ export async function POST(
     );
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, total: targets.length });
 }

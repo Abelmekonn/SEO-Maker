@@ -26,6 +26,9 @@ model Project {
   perfStatus  String       @default("idle")
   perfError   String?
   perfRunAt   DateTime?
+  perfDone    Int          @default(0)
+  perfTotal   Int          @default(0)
+  perfPageIds Json?
   createdAt   DateTime     @default(now())
   pages       Page[]
   competitors Competitor[]

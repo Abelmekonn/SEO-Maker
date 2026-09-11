@@ -24,8 +24,10 @@ const worker = new Worker<CrawlHomepageJob | RunPerformanceJob>(
     }
 
     if (job.name === RUN_PERFORMANCE_JOB) {
-      console.log(`Performance ${job.id}: ${job.data.url}`);
-      await runPerformanceJob(job.data as RunPerformanceJob);
+      const payload = job.data as RunPerformanceJob;
+      const count = payload.pages?.length ?? 1;
+      console.log(`Performance ${job.id}: ${count} page${count === 1 ? "" : "s"}`);
+      await runPerformanceJob(payload);
       console.log(`Performance ${job.id}: done`);
       return;
     }

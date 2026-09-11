@@ -10,3 +10,9 @@ if (process.env.NODE_ENV !== "production") {
 
 export { PrismaClient } from "@prisma/client";
 export type { Competitor, CompetitorPage, Page, PerformanceAudit, Project } from "@prisma/client";
+export {
+  incrementPerfDone,
+  readPerfProgress,
+  writePerfProgress,
+  type PerfProgress,
+} from "./perf-progress";

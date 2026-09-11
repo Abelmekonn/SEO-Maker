@@ -1,48 +1,80 @@
-import { prisma } from "@seo-maker/db";
+import { incrementPerfDone, prisma, writePerfProgress } from "@seo-maker/db";
 import { runPageSpeed, type PageSpeedResult, type Strategy } from "../lib/pagespeed";
+
+export type PerfPageTarget = {
+  pageId: string;
+  url: string;
+};
 
 export type RunPerformanceJob = {
   projectId: string;
-  pageId: string;
-  url: string;
+  pages?: PerfPageTarget[];
+  pageId?: string;
+  url?: string;
 };
 
 const strategies: Strategy[] = ["mobile", "desktop"];
 
 export async function runPerformanceJob(data: RunPerformanceJob) {
-  const { projectId, pageId, url } = data;
+  const { projectId } = data;
+  const pages = jobPages(data);
+
+  if (pages.length === 0) {
+    throw new Error("Performance job has no pages.");
+  }
 
   await prisma.project.update({
     where: { id: projectId },
-    data: { perfStatus: "running", perfError: null },
+    data: {
+      perfStatus: "running",
+      perfError: null,
+    },
+  });
+  await writePerfProgress(prisma, projectId, {
+    done: 0,
+    total: pages.length,
+    pageIds: pages.map((page) => page.pageId),
   });
 
   const errors: string[] = [];
-  let saved = 0;
+  let pagesSaved = 0;
 
-  // Run one strategy at a time so a failure in one does not discard the other,
-  // and so we stay under the per-100-seconds quota on the API key.
-  for (const strategy of strategies) {
-    try {
-      const result = await runPageSpeed(url, strategy);
-      await saveResult(pageId, result);
-      saved += 1;
-      console.log(
-        `Performance ${strategy}: perf ${result.performance ?? "-"}, seo ${result.seo ?? "-"}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      errors.push(`${strategy}: ${message}`);
-      console.error(`Performance ${strategy} failed:`, message);
+  for (const [index, page] of pages.entries()) {
+    console.log(`Performance page ${index + 1}/${pages.length}: ${page.url}`);
+    const pageErrors: string[] = [];
+    let saved = 0;
+
+    for (const strategy of strategies) {
+      try {
+        const result = await runPageSpeed(page.url, strategy);
+        await saveResult(page.pageId, result);
+        saved += 1;
+        console.log(
+          `Performance ${strategy}: perf ${result.performance ?? "-"}, seo ${result.seo ?? "-"}`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        pageErrors.push(`${strategy}: ${message}`);
+        console.error(`Performance ${strategy} failed:`, message);
+      }
     }
+
+    if (saved > 0) {
+      pagesSaved += 1;
+    }
+    if (pageErrors.length > 0) {
+      errors.push(`${page.url}: ${pageErrors.join(" ")}`);
+    }
+
+    await incrementPerfDone(prisma, projectId);
   }
 
-  if (saved === 0) {
+  if (pagesSaved === 0) {
     await prisma.project.update({
       where: { id: projectId },
       data: { perfStatus: "failed", perfError: errors.join(" ") },
     });
-    throw new Error(errors.join(" "));
+    return;
   }
 
   await prisma.project.update({
@@ -53,6 +85,16 @@ export async function runPerformanceJob(data: RunPerformanceJob) {
       perfRunAt: new Date(),
     },
   });
+}
+
+function jobPages(data: RunPerformanceJob): PerfPageTarget[] {
+  if (Array.isArray(data.pages) && data.pages.length > 0) {
+    return data.pages;
+  }
+  if (data.pageId && data.url) {
+    return [{ pageId: data.pageId, url: data.url }];
+  }
+  return [];
 }
 
 async function saveResult(pageId: string, result: PageSpeedResult) {
