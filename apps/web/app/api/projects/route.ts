@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
+import { getAccountForUser } from "@/lib/plan";
 import { requireUserId } from "@/lib/projects";
 import { enqueueHomepageCrawl } from "@/lib/queue";
 import { normalizeSiteUrl } from "@/lib/site-url";
@@ -32,15 +33,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: normalized.error }, { status: 400 });
   }
 
-  const existing = await prisma.project.findFirst({
-    where: { userId },
-  });
+  const account = await getAccountForUser(userId);
+  const projectCount = await prisma.project.count({ where: { userId } });
 
-  if (existing) {
+  if (projectCount >= account.limits.maxProjects) {
+    const existing = await prisma.project.findFirst({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+    });
     return NextResponse.json(
       {
-        error: "Free includes one project. Open the project you already started.",
-        id: existing.id,
+        error:
+          account.plan === "free"
+            ? "Free includes one project. Open the project you already started."
+            : `${account.limits.label} includes ${account.limits.maxProjects} projects.`,
+        id: existing?.id,
       },
       { status: 409 },
     );
@@ -52,7 +59,7 @@ export async function POST(request: Request) {
       userId,
       rootUrl: normalized.href,
       name: normalized.hostname,
-      maxPages: 1,
+      maxPages: account.limits.maxPages,
       status: "pending",
       pages: {
         create: {

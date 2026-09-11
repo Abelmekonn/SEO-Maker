@@ -2,9 +2,19 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-export function RecrawlButton({ projectId }: { projectId: string }) {
+export function RecrawlButton({
+  projectId,
+  maxPages = 1,
+  appearance = "outline",
+}: {
+  projectId: string;
+  maxPages?: number;
+  appearance?: "outline" | "primary";
+}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -24,16 +34,19 @@ export function RecrawlButton({ projectId }: { projectId: string }) {
     router.refresh();
   }
 
+  const label = pending ? "Queuing" : maxPages > 1 ? "Crawl site" : "Run homepage crawl";
+
   return (
     <div className="flex flex-col items-start gap-2">
       <Button
         type="button"
-        variant="outline"
-        className="h-11 w-fit"
+        variant={appearance === "primary" ? "default" : "outline"}
+        className={cn("h-11 w-fit", appearance === "primary" && "rounded-full px-5")}
         disabled={pending}
         onClick={onClick}
       >
-        {pending ? "Queuing…" : "Run homepage crawl"}
+        <Play className="size-3.5 fill-current" aria-hidden />
+        {label}
       </Button>
       {error ? (
         <p role="alert" className="text-sm text-bad">

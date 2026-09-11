@@ -18,3 +18,14 @@ export function PlaceholderCard({
 }) {
   return <Panel>{children}</Panel>;
 }
+
+export function LaterSlice({ title }: { title: string }) {
+  return (
+    <PlaceholderCard>
+      <PlaceholderPage
+        title={title}
+        description={`${title} lands in a later slice.`}
+      />
+    </PlaceholderCard>
+  );
+}

@@ -89,8 +89,8 @@ export function UrlIntakeForm({ initialUrl = "" }: { initialUrl?: string }) {
         </div>
       ) : (
         <p className="text-sm text-body">
-          Free includes the homepage of one site. We crawl it when the project
-          starts.
+          We crawl the homepage when the project starts. Your plan sets how many
+          sites and pages you can add.
         </p>
       )}
       <Button type="submit" className="h-11 w-fit" disabled={pending}>

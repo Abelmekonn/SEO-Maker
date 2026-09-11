@@ -32,7 +32,7 @@ const worker = new Worker<CrawlHomepageJob | RunPerformanceJob>(
 
     throw new Error(`Unknown job name: ${job.name}`);
   },
-  { connection, concurrency: 1 },
+  { connection, concurrency: 1, lockDuration: 15 * 60 * 1000 },
 );
 
 worker.on("failed", (job, error) => {

@@ -11,6 +11,7 @@ import { RunPerformanceButton } from "@/components/project/RunPerformanceButton"
 import { StatusBadge } from "@/components/project/StatusBadge";
 import { PERF_ACTIVE } from "@/lib/performance";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
+import { findHomepage } from "@/lib/site-url";
 
 export default async function ProjectPerformancePage({
   params,
@@ -28,7 +29,7 @@ export default async function ProjectPerformancePage({
     notFound();
   }
 
-  const homepage = project.pages[0];
+  const homepage = findHomepage(project.pages, project.rootUrl);
   const audits = homepage
     ? await prisma.performanceAudit.findMany({
         where: { pageId: homepage.id },

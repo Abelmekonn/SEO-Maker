@@ -29,6 +29,37 @@ export function normalizeSiteUrl(value: string): NormalizedSiteUrl | { error: st
   }
 }
 
+export function findHomepage<T extends { url: string; finalUrl?: string | null }>(
+  pages: T[],
+  rootUrl: string,
+): T | null {
+  if (pages.length === 0) {
+    return null;
+  }
+
+  const root = tryUrl(rootUrl);
+  const match = pages.find((page) => {
+    const pageUrl = tryUrl(page.finalUrl ?? page.url);
+    if (!root || !pageUrl) {
+      return page.url === rootUrl;
+    }
+    return (
+      pageUrl.origin === root.origin &&
+      (pageUrl.pathname === "/" || pageUrl.pathname === "" || pageUrl.pathname === root.pathname)
+    );
+  });
+
+  return match ?? pages[0] ?? null;
+}
+
+function tryUrl(value: string) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
 export function pagePath(url: string) {
   try {
     const path = new URL(url).pathname;

@@ -1,7 +1,9 @@
 import { prisma } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
 import { ProjectOverview } from "@/components/project/ProjectOverview";
+import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
+import { findHomepage } from "@/lib/site-url";
 
 export default async function ProjectOverviewPage({
   params,
@@ -20,7 +22,9 @@ export default async function ProjectOverviewPage({
     notFound();
   }
 
-  const homepage = project.pages[0];
+  const account = await getAccountForUser(userId);
+  const maxPages = Math.max(project.maxPages, account.limits.maxPages);
+  const homepage = findHomepage(project.pages, project.rootUrl);
   const audits = homepage
     ? await prisma.performanceAudit.findMany({
         where: { pageId: homepage.id },
@@ -31,5 +35,14 @@ export default async function ProjectOverviewPage({
   const mobile = audits.find((audit) => audit.strategy === "mobile") ?? null;
   const desktop = audits.find((audit) => audit.strategy === "desktop") ?? null;
 
-  return <ProjectOverview project={project} mobile={mobile} desktop={desktop} />;
+  return (
+    <ProjectOverview
+      project={project}
+      plan={account.plan}
+      planLabel={account.limits.label}
+      maxPages={maxPages}
+      mobile={mobile}
+      desktop={desktop}
+    />
+  );
 }

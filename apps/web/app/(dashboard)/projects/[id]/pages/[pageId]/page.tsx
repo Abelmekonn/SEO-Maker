@@ -56,7 +56,7 @@ export default async function ProjectPageDetailPage({
                 <ArrowUpRight aria-hidden />
               </a>
             </Button>
-            <RecrawlButton projectId={id} />
+            <RecrawlButton projectId={id} maxPages={page.project.maxPages} />
           </>
         }
       />

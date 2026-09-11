@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { enqueuePerformanceAudit } from "@/lib/queue";
+import { findHomepage } from "@/lib/site-url";
 
 const ACTIVE = new Set(["queued", "running"]);
 
@@ -21,7 +22,7 @@ export async function POST(
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
-  const homepage = project.pages[0];
+  const homepage = findHomepage(project.pages, project.rootUrl);
   if (!homepage) {
     return NextResponse.json({ error: "No homepage to test." }, { status: 400 });
   }

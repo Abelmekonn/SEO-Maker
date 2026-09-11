@@ -1,7 +1,32 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
+import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { enqueueHomepageCrawl } from "@/lib/queue";
+import { findHomepage } from "@/lib/site-url";
+
+const RESET = {
+  status: "pending",
+  finalUrl: null,
+  isHttps: null,
+  statusCode: null,
+  title: null,
+  metaDesc: null,
+  h1: null,
+  h2Count: null,
+  canonicalUrl: null,
+  wordCount: null,
+  imageCount: null,
+  missingAlt: null,
+  internalLinks: null,
+  schemaCount: null,
+  robotsTxtUrl: null,
+  robotsOk: null,
+  sitemapUrl: null,
+  hasSitemap: null,
+  xRobotsTag: null,
+  indexable: null,
+};
 
 export async function POST(
   _request: Request,
@@ -13,60 +38,41 @@ export async function POST(
   }
 
   const { id } = await params;
-  const project = await getProjectForUser(id, userId);
+  const [project, account] = await Promise.all([
+    getProjectForUser(id, userId),
+    getAccountForUser(userId),
+  ]);
 
   if (!project) {
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
-  const homepage = project.pages[0];
-  if (!homepage) {
-    return NextResponse.json({ error: "No homepage to crawl." }, { status: 400 });
-  }
+  const seed = findHomepage(project.pages, project.rootUrl);
+  const startUrl = seed?.url ?? project.rootUrl;
+  const maxPages = Math.max(project.maxPages, account.limits.maxPages);
 
   await prisma.project.update({
     where: { id: project.id },
-    data: { status: "pending" },
+    data: { status: "pending", maxPages },
   });
-  await prisma.page.update({
-    where: { id: homepage.id },
-    data: {
-      status: "pending",
-      finalUrl: null,
-      isHttps: null,
-      statusCode: null,
-      title: null,
-      metaDesc: null,
-      h1: null,
-      h2Count: null,
-      canonicalUrl: null,
-      wordCount: null,
-      imageCount: null,
-      missingAlt: null,
-      internalLinks: null,
-      schemaCount: null,
-      robotsTxtUrl: null,
-      robotsOk: null,
-      sitemapUrl: null,
-      hasSitemap: null,
-      xRobotsTag: null,
-      indexable: null,
-    },
+  await prisma.page.updateMany({
+    where: { projectId: project.id },
+    data: RESET,
   });
 
   try {
     await enqueueHomepageCrawl({
       projectId: project.id,
-      pageId: homepage.id,
-      url: homepage.url,
+      pageId: seed?.id ?? project.id,
+      url: startUrl,
     });
   } catch (error) {
-    console.error("Failed to enqueue homepage crawl", error);
+    console.error("Failed to enqueue crawl", error);
     return NextResponse.json(
       { error: "Queue is not running. Start Redis and the worker." },
       { status: 503 },
     );
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, maxPages });
 }

@@ -7,6 +7,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Account {
+  userId    String   @id
+  email     String   @unique
+  plan      String   @default("free")
+  source    String   @default("signup")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Project {
   id          String       @id @default(cuid())
   userId      String

@@ -168,6 +168,84 @@ export function checkValue(
   }
 }
 
+export function pageSeoScore(page: Page) {
+  if (!isCrawled(page)) {
+    return null;
+  }
+  const failed = failedChecks(page).length;
+  return Math.round(((checks.length - failed) / checks.length) * 100);
+}
+
+export function siteSeoScore(pages: Page[]) {
+  const scores = pages.map(pageSeoScore).filter((score): score is number => score != null);
+  if (scores.length === 0) {
+    return null;
+  }
+  return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+}
+
+export const technicalCheckIds: CheckId[] = [
+  "status",
+  "canonical",
+  "schema",
+  "indexability",
+  "robots",
+  "sitemap",
+];
+
+export const onPageCheckIds: CheckId[] = ["title", "meta", "h1", "h2", "images", "links", "words"];
+
+export function pageCategoryScore(page: Page, ids: CheckId[]) {
+  if (!isCrawled(page) || ids.length === 0) {
+    return null;
+  }
+  const failed = ids.filter((id) => failsCheck(page, id)).length;
+  return Math.round(((ids.length - failed) / ids.length) * 100);
+}
+
+export function siteCategoryScore(pages: Page[], ids: CheckId[]) {
+  const scores = pages
+    .map((page) => pageCategoryScore(page, ids))
+    .filter((score): score is number => score != null);
+  if (scores.length === 0) {
+    return null;
+  }
+  return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+}
+
+export type PageHealth = "optimized" | "issues" | "warnings" | "critical" | "pending";
+
+const criticalIds: CheckId[] = ["status", "indexability"];
+const warningIds: CheckId[] = ["words", "h2", "images", "links"];
+
+export function pageHealth(page: Page): PageHealth {
+  if (!isCrawled(page)) {
+    return "pending";
+  }
+  if (page.status === "failed" || failsCheck(page, "status")) {
+    return "critical";
+  }
+  const failed = failedChecks(page);
+  if (failed.length === 0) {
+    return "optimized";
+  }
+  if (failed.some((check) => criticalIds.includes(check.id))) {
+    return "critical";
+  }
+  if (failed.every((check) => warningIds.includes(check.id))) {
+    return "warnings";
+  }
+  return "issues";
+}
+
+export const healthLabels: Record<PageHealth, string> = {
+  optimized: "Optimized",
+  issues: "Issues",
+  warnings: "Warnings",
+  critical: "Critical",
+  pending: "Pending",
+};
+
 export function hasIssue(page: Page) {
   return page.status === "failed" || failedChecks(page).length > 0;
 }
