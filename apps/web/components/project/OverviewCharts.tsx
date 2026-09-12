@@ -373,17 +373,17 @@ export function TrendLines({
   const w = 640;
   const h = 248;
   const padLeft = 36;
-  const padRight = 12;
+  const padRight = 16;
   const padTop = 10;
   const padBottom = 28;
   const length = Math.max(2, ...series.map((item) => item.values.length));
   const innerW = w - padLeft - padRight;
   const innerH = h - padTop - padBottom;
   const step = innerW / Math.max(1, length - 1);
+  const filterId = `trend-shadow-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 
   function coords(values: Array<number | null>) {
-    const filled = values.length < 2 && values[0] != null ? [values[0], values[0]] : values;
-    return filled.flatMap((value, index) => {
+    return values.flatMap((value, index) => {
       if (value == null) return [];
       return [
         {
@@ -397,7 +397,7 @@ export function TrendLines({
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="h-[248px] w-full overflow-visible" role="img" aria-label={label}>
       <defs>
-        <filter id="trend-shadow" x="-8%" y="-20%" width="116%" height="160%">
+        <filter id={filterId} x="-8%" y="-20%" width="116%" height="160%">
           <feDropShadow dx="0" dy="3" stdDeviation="2.4" floodColor="#000000" floodOpacity="0.45" />
         </filter>
       </defs>
@@ -428,7 +428,7 @@ export function TrendLines({
         const dots = coords(item.values);
         const line = dots.map((dot) => `${dot.x},${dot.y}`).join(" ");
         return (
-          <g key={item.key} filter="url(#trend-shadow)">
+          <g key={item.key} filter={`url(#${filterId})`}>
             <polyline
               points={line}
               fill="none"

@@ -98,25 +98,22 @@ function jobPages(data: RunPerformanceJob): PerfPageTarget[] {
 }
 
 async function saveResult(pageId: string, result: PageSpeedResult) {
-  await prisma.$transaction([
-    prisma.performanceAudit.deleteMany({ where: { pageId, strategy: result.strategy } }),
-    prisma.performanceAudit.create({
-      data: {
-        pageId,
-        strategy: result.strategy,
-        performance: result.performance,
-        accessibility: result.accessibility,
-        bestPractices: result.bestPractices,
-        seo: result.seo,
-        fcp: result.fcp,
-        lcp: result.lcp,
-        cls: result.cls,
-        tbt: result.tbt,
-        inp: result.inp,
-        rawData: result.rawData as object,
-        opportunities: result.opportunities,
-        diagnostics: result.diagnostics,
-      },
-    }),
-  ]);
+  await prisma.performanceAudit.create({
+    data: {
+      pageId,
+      strategy: result.strategy,
+      performance: result.performance,
+      accessibility: result.accessibility,
+      bestPractices: result.bestPractices,
+      seo: result.seo,
+      fcp: result.fcp,
+      lcp: result.lcp,
+      cls: result.cls,
+      tbt: result.tbt,
+      inp: result.inp,
+      rawData: result.rawData as object,
+      opportunities: result.opportunities,
+      diagnostics: result.diagnostics,
+    },
+  });
 }

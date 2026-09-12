@@ -12,7 +12,14 @@ export type PageSpeedResult = {
   tbt: number | null;
   inp: number | null;
   rawData: Record<string, unknown>;
-  opportunities: Array<{ id: string; title: string; savingsMs: number }>;
+  opportunities: Array<{
+    id: string;
+    title: string;
+    savingsMs: number;
+    savingsBytes: number;
+    description: string;
+    displayValue: string;
+  }>;
   diagnostics: Array<{ id: string; title: string; value: string }>;
 };
 
@@ -112,6 +119,10 @@ export async function runPageSpeed(url: string, strategy: Strategy): Promise<Pag
       lighthouseVersion: lhr.lighthouseVersion,
       finalUrl: lhr.finalDisplayedUrl ?? lhr.finalUrl,
       loadingExperience: payload.loadingExperience ?? null,
+      metrics: {
+        ttfb: toSeconds(audits["server-response-time"]?.numericValue),
+        speedIndex: toSeconds(audits["speed-index"]?.numericValue),
+      },
     },
     opportunities: extractOpportunities(audits),
     diagnostics: extractDiagnostics(audits),
@@ -139,11 +150,33 @@ function extractOpportunities(audits: Record<string, any>) {
     .map(([id, audit]) => {
       const title = typeof audit?.title === "string" ? audit.title : null;
       const savingsMs = Number(audit?.details?.overallSavingsMs ?? 0);
-      return title && savingsMs > 0 ? { id, title, savingsMs: Math.round(savingsMs) } : null;
+      const savingsBytes = Number(audit?.details?.overallSavingsBytes ?? 0);
+      if (!title || (savingsMs <= 0 && savingsBytes <= 0)) {
+        return null;
+      }
+      return {
+        id,
+        title,
+        savingsMs: Math.round(savingsMs),
+        savingsBytes: Math.round(savingsBytes),
+        description: typeof audit?.description === "string" ? audit.description : "",
+        displayValue: typeof audit?.displayValue === "string" ? audit.displayValue : "",
+      };
     })
-    .filter((item): item is { id: string; title: string; savingsMs: number } => item !== null)
-    .sort((a, b) => b.savingsMs - a.savingsMs)
-    .slice(0, 6);
+    .filter(
+      (
+        item,
+      ): item is {
+        id: string;
+        title: string;
+        savingsMs: number;
+        savingsBytes: number;
+        description: string;
+        displayValue: string;
+      } => item !== null,
+    )
+    .sort((a, b) => b.savingsMs - a.savingsMs || b.savingsBytes - a.savingsBytes)
+    .slice(0, 12);
 }
 
 function extractDiagnostics(audits: Record<string, any>) {
@@ -156,6 +189,13 @@ function extractDiagnostics(audits: Record<string, any>) {
     "offscreen-images",
     "total-byte-weight",
     "dom-size",
+    "bootup-time",
+    "mainthread-work-breakdown",
+    "critical-request-chains",
+    "uses-long-cache-ttl",
+    "font-display",
+    "unminified-javascript",
+    "unminified-css",
   ];
 
   return ids

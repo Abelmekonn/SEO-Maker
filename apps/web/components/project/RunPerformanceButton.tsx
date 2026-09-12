@@ -11,12 +11,14 @@ export function RunPerformanceButton({
   active = false,
   hasResults = false,
   disabled = false,
+  runLabel = "Run PageSpeed",
 }: {
   projectId: string;
   pageIds: string[];
   active?: boolean;
   hasResults?: boolean;
   disabled?: boolean;
+  runLabel?: string;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -62,8 +64,8 @@ export function RunPerformanceButton({
                 ? `Run again (${count})`
                 : "Run again"
               : count > 1
-                ? `Run PageSpeed (${count})`
-                : "Run PageSpeed"}
+                ? `${runLabel} (${count})`
+                : runLabel}
       </Button>
       {error ? (
         <p role="alert" className="text-sm text-bad">

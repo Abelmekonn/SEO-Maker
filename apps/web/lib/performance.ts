@@ -49,8 +49,16 @@ export function vitalValue(audit: PerformanceAudit, def: VitalDef) {
   return audit[def.id];
 }
 
-export type Opportunity = { id: string; title: string; savingsMs: number };
+export type Opportunity = {
+  id: string;
+  title: string;
+  savingsMs: number;
+  savingsBytes?: number;
+  description?: string;
+  displayValue?: string;
+};
 export type Diagnostic = { id: string; title: string; value: string };
+export type OpportunityPriority = "high" | "medium" | "low";
 
 export function readOpportunities(value: unknown): Opportunity[] {
   if (!Array.isArray(value)) return [];
@@ -60,6 +68,44 @@ export function readOpportunities(value: unknown): Opportunity[] {
       typeof item?.title === "string" &&
       typeof item?.savingsMs === "number",
   );
+}
+
+export function opportunityPriority(item: Opportunity): OpportunityPriority {
+  const bytes = item.savingsBytes ?? 0;
+  if (item.savingsMs >= 400 || bytes >= 200_000) return "high";
+  if (item.savingsMs >= 150 || bytes >= 50_000) return "medium";
+  return "low";
+}
+
+export function scoreBand(score: number | null | undefined) {
+  if (score == null) return { rating: "none" as Rating, label: "No data" };
+  if (score >= 100) return { rating: "good" as Rating, label: "Excellent" };
+  if (score >= 90) return { rating: "good" as Rating, label: "Good" };
+  if (score >= 50) return { rating: "warn" as Rating, label: "Needs work" };
+  return { rating: "bad" as Rating, label: "Poor" };
+}
+
+export function extraMetrics(rawData: unknown) {
+  const metrics =
+    rawData && typeof rawData === "object" && "metrics" in rawData
+      ? (rawData as { metrics?: { ttfb?: unknown; speedIndex?: unknown } }).metrics
+      : null;
+  return {
+    ttfb: typeof metrics?.ttfb === "number" ? metrics.ttfb : null,
+    speedIndex: typeof metrics?.speedIndex === "number" ? metrics.speedIndex : null,
+  };
+}
+
+export function formatRelativeRun(date: Date | null | undefined) {
+  if (!date) return "No run yet";
+  const diff = Date.now() - date.getTime();
+  const minutes = Math.round(diff / 60_000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 export function readDiagnostics(value: unknown): Diagnostic[] {
@@ -73,4 +119,10 @@ export function readDiagnostics(value: unknown): Diagnostic[] {
 export function formatSavings(ms: number) {
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)} s`;
   return `${Math.round(ms)} ms`;
+}
+
+export function formatBytes(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KiB`;
+  return `${Math.round(bytes)} B`;
 }
