@@ -3,16 +3,32 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Activity,
+  ArrowUpRight,
+  CalendarClock,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  FileCode,
   Gauge,
+  ImageIcon,
+  Info,
+  Link2,
   LoaderCircle,
+  Lock,
   Monitor,
+  Search,
+  Server,
   Smartphone,
   Sparkles,
+  Timer,
+  Zap,
 } from "lucide-react";
 import { TrendLines } from "@/components/project/OverviewCharts";
 import { PerformanceStatus } from "@/components/project/PerformanceReport";
 import { RunPerformanceButton } from "@/components/project/RunPerformanceButton";
+import { ScoreRing } from "@/components/project/ScoreRing";
 import { StatusBadge } from "@/components/project/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { playbookFor, summarizePerformance } from "@/lib/perf-playbook";
@@ -35,6 +51,12 @@ import { cn } from "@/lib/utils";
 const lcpDef = vitals.find((item) => item.id === "lcp")!;
 const inpDef = vitals.find((item) => item.id === "inp")!;
 const clsDef = vitals.find((item) => item.id === "cls")!;
+const fcpDef = vitals.find((item) => item.id === "fcp")!;
+const tbtDef = vitals.find((item) => item.id === "tbt")!;
+
+// Lighthouse's own documented scoring curve thresholds (not derived from user data).
+const ttfbThreshold = { good: 0.8, poor: 1.8 };
+const speedIndexThreshold = { good: 3.4, poor: 5.8 };
 
 const ratingText: Record<Rating, string> = {
   good: "text-good",
@@ -43,11 +65,43 @@ const ratingText: Record<Rating, string> = {
   none: "text-muted-foreground",
 };
 
+const ratingBadge: Record<Rating, string> = {
+  good: "bg-good/15 text-good",
+  warn: "bg-warn/15 text-warn",
+  bad: "bg-bad/15 text-bad",
+  none: "bg-surface-card text-muted-foreground",
+};
+
+const ratingLabel: Record<Rating, string> = {
+  good: "Good",
+  warn: "Needs improvement",
+  bad: "Poor",
+  none: "No data",
+};
+
 const priorityStyle: Record<OpportunityPriority, string> = {
   high: "bg-bad/15 text-bad",
   medium: "bg-warn/15 text-warn",
   low: "bg-surface-card text-body",
 };
+
+function simpleRating(value: number | null | undefined, good: number, poor: number): Rating {
+  if (value == null) return "none";
+  if (value <= good) return "good";
+  if (value <= poor) return "warn";
+  return "bad";
+}
+
+const opportunityIcon: { match: RegExp; icon: typeof Zap }[] = [
+  { match: /image/i, icon: ImageIcon },
+  { match: /javascript|script/i, icon: FileCode },
+  { match: /cache|caching/i, icon: Database },
+  { match: /request|dns|connection|chain/i, icon: Link2 },
+];
+
+function iconFor(title: string) {
+  return opportunityIcon.find((entry) => entry.match.test(title))?.icon ?? Zap;
+}
 
 export function PerformanceDashboard({
   projectId,
@@ -94,6 +148,8 @@ export function PerformanceDashboard({
   const canSelect = plan !== "free";
   const [strategy, setStrategy] = useState<PerfStrategy>("mobile");
   const [query, setQuery] = useState("");
+  const [pageSize, setPageSize] = useState(10);
+  const [page, setPage] = useState(1);
   const [oppFilter, setOppFilter] = useState<"all" | OpportunityPriority>("all");
   const [openOpp, setOpenOpp] = useState<string | null>(null);
   const [openDiag, setOpenDiag] = useState<string | null>(null);
@@ -171,6 +227,13 @@ export function PerformanceDashboard({
       });
   }, [latest, pages, query]);
 
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = useMemo(
+    () => rows.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [rows, currentPage, pageSize],
+  );
+
   const crawledIds = pages.filter((page) => page.crawled || page.id === homepageId).map((page) => page.id);
   const failedIds = crawledIds.filter((id) => !latest.get(id));
   const trend = useMemo(() => {
@@ -231,16 +294,17 @@ export function PerformanceDashboard({
               </span>
             </div>
             <p className="max-w-2xl text-sm leading-6 text-body">
-              Understand your website's speed, prioritize the biggest performance problems, and get
+              Understand your website&apos;s speed, prioritize the biggest performance problems, and get
               actionable fixes. Lab data from Lighthouse.
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <DeviceToggle value={strategy} onChange={setStrategy} />
-          <p className="font-mono text-[12px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-soft px-3 py-1.5 font-mono text-[12px] text-muted-foreground ring-1 ring-hairline">
+            <CalendarClock className="size-3.5" aria-hidden />
             Last run {formatRelativeRun(lastRunAt ? new Date(lastRunAt) : null)}
-          </p>
+          </span>
           <RunPerformanceButton
             projectId={projectId}
             pageIds={pageIds}
@@ -265,50 +329,80 @@ export function PerformanceDashboard({
         <ScoreCard label="SEO" score={headline?.seo ?? null} />
       </section>
 
-      <section className="flex flex-col gap-3 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
+      <section className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
+            <h2 className="flex items-center gap-1.5 font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
               Core Web Vitals
+              <Info className="size-3.5 text-muted-soft" aria-hidden />
             </h2>
-            <p className="mt-1 text-sm leading-6 text-body">
-              These metrics measure loading speed, responsiveness, and visual stability. Lab data
-              from Lighthouse, not real-user Chrome data.
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-body">
+              These metrics measure your site&apos;s loading speed, interactivity, and visual
+              stability.
             </p>
+          </div>
+          <div className="flex rounded-full bg-canvas p-1 ring-1 ring-hairline">
+            <span className="inline-flex h-8 items-center rounded-full bg-primary px-3 text-[12px] font-medium text-primary-foreground">
+              Lab data (Lighthouse)
+            </span>
+            <span className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium text-muted-foreground">
+              Real user data
+              <Lock className="size-3" aria-hidden />
+            </span>
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <VitalCard
             label="LCP"
-            hint="Largest content"
+            hint="Largest Contentful Paint"
             value={headline?.lcp ?? null}
             rating={vitalRating(lcpDef, headline?.lcp)}
+            def={lcpDef}
             display={headline?.lcp == null ? "-" : lcpDef.format(headline.lcp)}
           />
           <VitalCard
             label="INP"
-            hint="Interaction"
+            hint="Interaction to Next Paint"
             value={headline?.inp ?? null}
             rating={vitalRating(inpDef, headline?.inp)}
+            def={inpDef}
             display={headline?.inp == null ? "-" : inpDef.format(headline.inp)}
           />
           <VitalCard
             label="CLS"
-            hint="Layout stability"
+            hint="Cumulative Layout Shift"
             value={headline?.cls ?? null}
             rating={vitalRating(clsDef, headline?.cls)}
+            def={clsDef}
             display={headline?.cls == null ? "-" : clsDef.format(headline.cls)}
           />
         </div>
-        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <ExtraMetric label="FCP" value={headline?.fcp == null ? "-" : `${headline.fcp.toFixed(1)} s`} />
-          <ExtraMetric label="TTFB" value={headline?.ttfb == null ? "-" : `${headline.ttfb.toFixed(1)} s`} />
-          <ExtraMetric label="TBT" value={headline?.tbt == null ? "-" : `${Math.round(headline.tbt)} ms`} />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <ExtraMetric
+            icon={Zap}
+            label="FCP"
+            value={headline?.fcp == null ? "-" : fcpDef.format(headline.fcp)}
+            rating={simpleRating(headline?.fcp, fcpDef.good, fcpDef.poor)}
+          />
+          <ExtraMetric
+            icon={Server}
+            label="TTFB"
+            value={headline?.ttfb == null ? "-" : `${headline.ttfb.toFixed(1)} s`}
+            rating={simpleRating(headline?.ttfb, ttfbThreshold.good, ttfbThreshold.poor)}
+          />
+          <ExtraMetric
+            icon={Timer}
+            label="TBT"
+            value={headline?.tbt == null ? "-" : tbtDef.format(headline.tbt)}
+            rating={simpleRating(headline?.tbt, tbtDef.good, tbtDef.poor)}
+          />
+          <ExtraMetric
+            icon={Activity}
             label="Speed Index"
             value={headline?.speedIndex == null ? "-" : `${headline.speedIndex.toFixed(1)} s`}
+            rating={simpleRating(headline?.speedIndex, speedIndexThreshold.good, speedIndexThreshold.poor)}
           />
-        </dl>
+        </div>
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,340px)]">
@@ -343,31 +437,49 @@ export function PerformanceDashboard({
         <aside className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
           <div className="flex items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
-              <Sparkles className="size-4 text-primary" aria-hidden />
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <Sparkles className="size-4" aria-hidden />
+              </span>
               AI Performance Assistant
             </h2>
-            <p className="font-mono text-[12px] text-muted-foreground">From this run</p>
           </div>
-          <p className="text-sm leading-6 text-body">
+          <p className="rounded-lg bg-canvas p-3 text-sm leading-6 text-body ring-1 ring-hairline">
             {summarizePerformance(headline?.performance ?? null, topOpp, headlinePath)}
           </p>
-          {opportunities.slice(0, 3).length > 0 ? (
-            <ol className="flex flex-col gap-2">
-              {opportunities.slice(0, 3).map((item, index) => (
-                <li key={item.id} className="flex items-start justify-between gap-3 text-sm">
-                  <span className="text-ink">
-                    {index + 1}. {item.title}
-                  </span>
-                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px]", priorityStyle[item.priority])}>
-                    {item.priority}
-                  </span>
-                </li>
-              ))}
-            </ol>
+          {opportunities.slice(0, 4).length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="font-mono text-[12px] text-muted-foreground">Top recommendations</p>
+              <ol className="flex flex-col gap-2">
+                {opportunities.slice(0, 4).map((item, index) => (
+                  <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="flex min-w-0 items-center gap-2.5 text-ink">
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-card font-mono text-[11px] text-muted-foreground">
+                        {index + 1}
+                      </span>
+                      <span className="truncate">{item.title}</span>
+                    </span>
+                    <span className={cn("shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px] capitalize", priorityStyle[item.priority])}>
+                      {item.priority}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
           ) : null}
-          <Button type="button" className="h-11 w-full" disabled={!topOpp} onClick={() => setShowPlan((value) => !value)}>
-            {showPlan ? "Hide fix plan" : "Generate fix plan"}
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button type="button" className="h-11 w-full" disabled={!topOpp} onClick={() => setShowPlan((value) => !value)}>
+              {showPlan ? "Hide fix plan" : "Generate full fix plan"}
+              {!showPlan ? <ArrowUpRight className="size-4" aria-hidden /> : null}
+            </Button>
+            {opportunities.length > 4 ? (
+              <a
+                href="#opportunities"
+                className="self-center text-[12px] font-medium text-primary hover:underline"
+              >
+                View all suggestions
+              </a>
+            ) : null}
+          </div>
           {showPlan && topOpp ? (
             <div className="flex flex-col gap-2 rounded-lg bg-canvas p-3 ring-1 ring-hairline">
               <FixPlan item={topOpp} path={topOpp.pages[0] ?? headlinePath} />
@@ -376,7 +488,8 @@ export function PerformanceDashboard({
         </aside>
       </div>
 
-      <section className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
+      <div className="grid gap-4 lg:grid-cols-2">
+      <section id="opportunities" className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline scroll-mt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
@@ -410,6 +523,7 @@ export function PerformanceDashboard({
           <ul className="divide-y divide-hairline">
             {visibleOpps.map((item) => {
               const open = openOpp === item.id;
+              const Icon = iconFor(item.title);
               return (
                 <li key={item.id}>
                   <button
@@ -418,26 +532,31 @@ export function PerformanceDashboard({
                     className="flex w-full items-start justify-between gap-4 py-3 text-left"
                     aria-expanded={open}
                   >
-                    <span className="min-w-0">
-                      <span className="block text-sm text-ink">{item.title}</span>
-                      <span className="mt-1 block font-mono text-[12px] text-muted-foreground">
-                        {item.pages.length === 1
-                          ? `${item.pages[0]} · ${strategy}`
-                          : `${item.pages.length} pages · ${strategy}`}
+                    <span className="flex min-w-0 items-start gap-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-canvas text-body ring-1 ring-hairline">
+                        <Icon className="size-4" aria-hidden />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm text-ink">{item.title}</span>
+                        <span className="mt-1 block font-mono text-[12px] text-muted-foreground">
+                          {item.pages.length === 1
+                            ? `${item.pages[0]} · ${strategy}`
+                            : `${item.pages.length} pages · ${strategy}`}
+                        </span>
                       </span>
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
-                      <span className={cn("rounded-full px-2 py-0.5 font-mono text-[11px] uppercase", priorityStyle[item.priority])}>
-                        {item.priority}
-                      </span>
-                      <span className="font-mono text-[12px] tabular-nums text-warn">
+                      <span className="hidden font-mono text-[12px] tabular-nums text-warn sm:inline">
                         {item.savingsMs > 0 ? formatSavings(item.savingsMs) : formatBytes(item.savingsBytes ?? 0)}
+                      </span>
+                      <span className={cn("rounded-full px-2 py-0.5 font-mono text-[11px] capitalize", priorityStyle[item.priority])}>
+                        {item.priority}
                       </span>
                       <ChevronDown className={cn("size-4 text-muted-soft transition-transform", open && "rotate-180")} />
                     </span>
                   </button>
                   {open ? (
-                    <div className="pb-4">
+                    <div className="pb-4 pl-12">
                       <FixPlan item={item} path={item.pages[0] ?? headlinePath} />
                     </div>
                   ) : null}
@@ -464,6 +583,7 @@ export function PerformanceDashboard({
             {diagnostics.map((item) => {
               const open = openDiag === item.id;
               const book = playbookFor(item.id);
+              const Icon = iconFor(item.title);
               return (
                 <li key={item.id}>
                   <button
@@ -472,14 +592,19 @@ export function PerformanceDashboard({
                     className="flex w-full items-center justify-between gap-3 py-3 text-left"
                     aria-expanded={open}
                   >
-                    <span className="text-sm text-ink">{item.title}</span>
-                    <span className="flex items-center gap-2 font-mono text-[12px] text-muted-foreground">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-canvas text-body ring-1 ring-hairline">
+                        <Icon className="size-4" aria-hidden />
+                      </span>
+                      <span className="truncate text-sm text-ink">{item.title}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2 font-mono text-[12px] text-muted-foreground">
                       {item.value || (item.pages.length > 1 ? `${item.pages.length} pages` : item.pages[0])}
                       <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
                     </span>
                   </button>
                   {open ? (
-                    <p className="pb-4 text-sm leading-6 text-body">{book.why}</p>
+                    <p className="pb-4 pl-12 text-sm leading-6 text-body">{book.why}</p>
                   ) : null}
                 </li>
               );
@@ -487,6 +612,7 @@ export function PerformanceDashboard({
           </ul>
         )}
       </section>
+      </div>
 
       <section className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -519,13 +645,19 @@ export function PerformanceDashboard({
                 </Button>
               </>
             ) : null}
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search pages"
-              className="h-11 w-48 rounded-md bg-surface-soft px-3 text-sm text-ink ring-1 ring-hairline placeholder:text-muted-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
+            <span className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-soft" aria-hidden />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search pages"
+                className="h-11 w-48 rounded-md bg-surface-soft pl-9 pr-3 text-sm text-ink ring-1 ring-hairline placeholder:text-muted-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </span>
           </div>
         </div>
 
@@ -545,7 +677,7 @@ export function PerformanceDashboard({
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ page, audit }) => {
+              {pagedRows.map(({ page, audit }) => {
                 const href = `/projects/${projectId}/performance/${page.id}?device=${strategy}`;
                 const checked = selected.includes(page.id);
                 const atCap = !checked && selected.length >= maxPages;
@@ -585,8 +717,15 @@ export function PerformanceDashboard({
                     <td className="max-w-[240px] px-5 py-4">
                       <p className="truncate font-mono text-ink">{page.path}</p>
                     </td>
-                    <td className={cn("px-5 py-4 font-mono tabular-nums", ratingText[band.rating])}>
-                      {audit?.performance ?? "-"}
+                    <td className="px-5 py-4">
+                      <span
+                        className={cn(
+                          "inline-flex min-w-[34px] justify-center rounded-full px-2 py-0.5 font-mono text-[12px] font-medium tabular-nums",
+                          ratingBadge[band.rating],
+                        )}
+                      >
+                        {audit?.performance ?? "-"}
+                      </span>
                     </td>
                     <td className={cn("px-5 py-4 font-mono tabular-nums", ratingText[vitalRating(lcpDef, audit?.lcp)])}>
                       {audit?.lcp == null ? "-" : lcpDef.format(audit.lcp)}
@@ -618,6 +757,62 @@ export function PerformanceDashboard({
               })}
             </tbody>
           </table>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="font-mono text-[12px] text-muted-foreground">
+            {rows.length === 0
+              ? "No pages"
+              : `Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, rows.length)} of ${rows.length}`}
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 font-mono text-[12px] text-muted-foreground">
+              Rows per page
+              <div className="flex rounded-full bg-surface-soft p-1 ring-1 ring-hairline">
+                {[10, 25, 50, 100].map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => {
+                      setPageSize(size);
+                      setPage(1);
+                    }}
+                    className={cn(
+                      "h-7 rounded-full px-2.5 text-[12px] font-medium",
+                      pageSize === size ? "bg-surface-card text-ink" : "text-muted-foreground hover:text-ink",
+                    )}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                className="size-9 p-0"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="size-4" aria-hidden />
+              </Button>
+              <span className="min-w-[88px] text-center font-mono text-[12px] text-muted-foreground">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                className="size-9 p-0"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                aria-label="Next page"
+              >
+                <ChevronRight className="size-4" aria-hidden />
+              </Button>
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -671,18 +866,18 @@ function ScoreCard({
   return (
     <div
       className={cn(
-        "flex min-h-[132px] flex-col justify-between gap-3 rounded-xl bg-surface-soft p-4 ring-1",
+        "flex min-h-[168px] flex-col gap-3 rounded-xl bg-surface-soft p-4 ring-1",
         primary ? "ring-primary/40" : "ring-hairline",
       )}
     >
       <p className="font-mono text-[12px] text-muted-foreground">{label}</p>
-      <p className={cn("font-display text-[32px] leading-none tracking-[-0.6px] tabular-nums", ratingText[band.rating])}>
-        {score == null ? "-" : score}
-        <span className="text-[16px] text-muted-foreground"> / 100</span>
-      </p>
+      <div className="flex flex-1 items-center">
+        <ScoreRing score={score} size={76} strokeWidth={7} label={label} centerValue stackValue />
+      </div>
       {delta != null ? (
         <p className={cn("font-mono text-[12px] tabular-nums", delta >= 0 ? "text-good" : "text-bad")}>
-          {delta >= 0 ? "↑" : "↓"} {Math.abs(delta)} vs last run
+          {delta >= 0 ? "↑" : "↓"} {Math.abs(delta)}{" "}
+          <span className="text-muted-foreground">vs last crawl</span>
         </p>
       ) : (
         <p className={cn("text-sm", ratingText[band.rating])}>{band.label}</p>
@@ -695,23 +890,52 @@ function VitalCard({
   label,
   hint,
   display,
+  value,
   rating,
+  def,
 }: {
   label: string;
   hint: string;
   value: number | null;
   display: string;
   rating: Rating;
+  def: { good: number; poor: number };
 }) {
-  const names = { good: "Good", warn: "Needs improvement", bad: "Poor", none: "No data" };
+  const ceiling = def.poor * 1.4;
+  const pct = value == null ? 0 : Math.max(0, Math.min(100, (value / ceiling) * 100));
+  const goodPct = Math.min(100, (def.good / ceiling) * 100);
+  const poorPct = Math.min(100, (def.poor / ceiling) * 100);
+  const fmt = (n: number) => (n < 10 ? n.toFixed(n < 1 ? 2 : 1) : Math.round(n)).toString();
+
   return (
-    <div className="flex flex-col gap-2 rounded-lg bg-canvas p-4 ring-1 ring-hairline">
-      <p className="font-mono text-[12px] text-muted-foreground">{label}</p>
+    <div className="flex flex-col gap-3 rounded-lg bg-canvas p-4 ring-1 ring-hairline">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="font-mono text-[12px] text-muted-foreground">{label}</p>
+          <p className="text-xs text-muted-soft">{hint}</p>
+        </div>
+        <span className={cn("shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px]", ratingBadge[rating])}>
+          {ratingLabel[rating]}
+        </span>
+      </div>
       <p className={cn("font-display text-[28px] leading-none tracking-[-0.5px] tabular-nums", ratingText[rating])}>
         {display}
       </p>
-      <p className={cn("text-sm", ratingText[rating])}>{names[rating]}</p>
-      <p className="text-xs text-muted-foreground">{hint}</p>
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-gradient-to-r from-good via-warn to-bad">
+        <span aria-hidden className="absolute top-0 h-full w-px bg-canvas/70" style={{ left: `${goodPct}%` }} />
+        <span aria-hidden className="absolute top-0 h-full w-px bg-canvas/70" style={{ left: `${poorPct}%` }} />
+        {value != null ? (
+          <span
+            aria-hidden
+            className="absolute top-1/2 size-3 -translate-y-1/2 rounded-full border-2 border-canvas bg-ink shadow-sm"
+            style={{ left: `calc(${pct}% - 6px)` }}
+          />
+        ) : null}
+      </div>
+      <p className="text-[11px] leading-4 text-muted-soft">
+        Good: ≤ {fmt(def.good)} · Needs improvement: {fmt(def.good)}–{fmt(def.poor)} · Poor: &gt;{" "}
+        {fmt(def.poor)}
+      </p>
     </div>
   );
 }
@@ -725,11 +949,31 @@ function LegendDot({ className, label }: { className: string; label: string }) {
   );
 }
 
-function ExtraMetric({ label, value }: { label: string; value: string }) {
+function ExtraMetric({
+  icon: Icon,
+  label,
+  value,
+  rating,
+}: {
+  icon: typeof Zap;
+  label: string;
+  value: string;
+  rating: Rating;
+}) {
   return (
-    <div className="flex items-baseline justify-between gap-3 rounded-lg bg-canvas px-3 py-2 ring-1 ring-hairline">
-      <dt className="font-mono text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="font-mono text-sm tabular-nums text-ink">{value}</dd>
+    <div className="flex flex-col gap-2 rounded-lg bg-canvas p-3 ring-1 ring-hairline">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-card text-body">
+          <Icon className="size-3.5" aria-hidden />
+        </span>
+        {rating !== "none" ? (
+          <span className={cn("rounded-full px-1.5 py-0.5 font-mono text-[10px]", ratingBadge[rating])}>
+            {ratingLabel[rating]}
+          </span>
+        ) : null}
+      </div>
+      <p className="font-mono text-[11px] text-muted-foreground">{label}</p>
+      <p className="font-mono text-sm tabular-nums text-ink">{value}</p>
     </div>
   );
 }
