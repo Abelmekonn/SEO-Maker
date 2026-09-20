@@ -4,11 +4,11 @@ export type PlanId = "free" | "pro" | "agency";
 
 export const planLimits: Record<
   PlanId,
-  { label: string; maxProjects: number; maxPages: number }
+  { label: string; maxProjects: number; maxPages: number; maxCompetitors: number }
 > = {
-  free: { label: "Free", maxProjects: 1, maxPages: 1 },
-  pro: { label: "Pro", maxProjects: 1, maxPages: 10 },
-  agency: { label: "Agency", maxProjects: 100, maxPages: 100 },
+  free: { label: "Free", maxProjects: 1, maxPages: 1, maxCompetitors: 0 },
+  pro: { label: "Pro", maxProjects: 1, maxPages: 10, maxCompetitors: 5 },
+  agency: { label: "Agency", maxProjects: 100, maxPages: 100, maxCompetitors: 25 },
 };
 
 export function isPlanId(value: string): value is PlanId {

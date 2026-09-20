@@ -8,6 +8,10 @@
     "lint": {
       "dependsOn": ["^lint"]
     },
+    "test": {
+      "outputs": [],
+      "inputs": ["src/**", "vitest.config.ts", "package.json"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

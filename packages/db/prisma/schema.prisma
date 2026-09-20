@@ -29,9 +29,26 @@ model Project {
   perfDone    Int          @default(0)
   perfTotal   Int          @default(0)
   perfPageIds Json?
-  createdAt   DateTime     @default(now())
-  pages       Page[]
-  competitors Competitor[]
+
+  // Competitor discovery progress. Mirrors the perf* columns above so the UI can
+  // poll the project row instead of a separate run table.
+  compStatus     String    @default("idle")
+  compPhase      String?
+  compError      String?
+  compRunAt      DateTime?
+  compDone       Int       @default(0)
+  compTotal      Int       @default(0)
+  compPhaseDone  Int       @default(0)
+  compPhaseTotal Int       @default(0)
+  compProviderOk Boolean   @default(false)
+  compAiUsed     Boolean   @default(false)
+
+  createdAt         DateTime          @default(now())
+  pages             Page[]
+  competitors       Competitor[]
+  competitorQueries CompetitorQuery[]
+  contentGaps       ContentGap[]
+  opportunities     Opportunity[]
 
   @@index([userId])
 }
@@ -91,25 +108,57 @@ model PerformanceAudit {
   @@index([pageId])
 }
 
+/// source: manual | serp | ai
+/// status: pending | queued | crawling | analyzing | ready | failed | skipped
 model Competitor {
-  id          String           @id @default(cuid())
+  id          String  @id @default(cuid())
   projectId   String
-  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   domain      String
   name        String?
   source      String
+  /// Deprecated: superseded by `confidence`. Never written; kept to avoid a destructive migration.
   relevance   Float?
-  pageCount   Int              @default(0)
+  pageCount   Int     @default(0)
   seoScore    Float?
   performance Float?
   status      String
+  statusError String?
   metadata    Json?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  pages       CompetitorPage[]
+
+  /// COMPETITOR CONFIDENCE 0-100. Null when nothing could be measured.
+  confidence     Float?
+  confidenceBand String?
+
+  crawlDone      Int       @default(0)
+  crawlTotal     Int       @default(0)
+  lastCrawledAt  DateTime?
+  lastAnalyzedAt DateTime?
+
+  title        String?
+  description  String?
+  country      String?
+  language     String?
+  businessType String?
+  audience     String?
+
+  queryCount    Int    @default(0)
+  topQueryCount Int    @default(0)
+  avgPosition   Float?
+
+  pinned   Boolean @default(false)
+  excluded Boolean @default(false)
+
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  pages         CompetitorPage[]
+  analyses      CompetitorAnalysis[]
+  opportunities Opportunity[]
 
   @@unique([projectId, domain])
   @@index([projectId])
+  @@index([projectId, status])
+  @@index([projectId, confidence])
 }
 
 model CompetitorPage {
@@ -117,16 +166,182 @@ model CompetitorPage {
   competitorId    String
   competitor      Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
   url             String
+  finalUrl        String?
+  isHttps         Boolean?
+  statusCode      Int?
   title           String?
   metaDescription String?
   h1              String?
+  h2Count         Int?
+  canonicalUrl    String?
   wordCount       Int?
   internalLinks   Int?
   imageCount      Int?
+  missingAlt      Int?
+  schemaCount     Int?
   schema          Json?
+  indexable       Boolean?
+  xRobotsTag      String?
+  pageType        String?
   seoScore        Float?
   rawData         Json?
+  status          String     @default("pending")
   createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
+  @@unique([competitorId, url])
   @@index([competitorId])
+}
+
+/// source: seed | ai | page | manual
+/// intent: transactional | commercial | informational | navigational
+/// status: pending | fetched | unavailable | failed
+model CompetitorQuery {
+  id           String    @id @default(cuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  query        String
+  source       String
+  intent       String    @default("informational")
+  /// NOT NULL so the unique tuple works — Postgres treats NULLs as distinct.
+  locationCode Int       @default(2840)
+  languageCode String    @default("en")
+  relevance    Float?
+  searchVolume Int?
+  difficulty   Float?
+  cpc          Float?
+  /// Where the user's own site ranks for this query, when known.
+  selfPosition Int?
+  selfUrl      String?
+  status       String    @default("pending")
+  checkedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  results SerpResult[]
+
+  @@unique([projectId, query, locationCode, languageCode])
+  @@index([projectId])
+}
+
+/// resultType: organic | featured_snippet | paa | local_pack
+model SerpResult {
+  id         String          @id @default(cuid())
+  queryId    String
+  query      CompetitorQuery @relation(fields: [queryId], references: [id], onDelete: Cascade)
+  position   Int
+  domain     String
+  url        String
+  title      String?
+  snippet    String?
+  resultType String          @default("organic")
+  provider   String
+  fetchedAt  DateTime        @default(now())
+
+  @@unique([queryId, position, resultType])
+  @@index([queryId])
+  @@index([domain])
+}
+
+/// Append-only. One row per analysis run, which gives per-competitor history.
+model CompetitorAnalysis {
+  id           String     @id @default(cuid())
+  competitorId String
+  competitor   Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  seoScore            Float?
+  technicalScore      Float?
+  onPageScore         Float?
+  contentScore        Float?
+  performanceScore    Float?
+  internalLinksScore  Float?
+  structuredDataScore Float?
+  /// Weights after redistribution, so a stored score can always be audited.
+  measuredWeights     Json?
+  /// SeoDimensionId[] that could not be measured.
+  notMeasured         Json?
+
+  confidence      Float?
+  confidenceParts Json?
+
+  pagesAnalyzed    Int    @default(0)
+  avgWordCount     Float?
+  avgInternalLinks Float?
+  schemaCoverage   Float?
+
+  summary    String?
+  strengths  Json?
+  weaknesses Json?
+
+  aiUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([competitorId, createdAt])
+}
+
+/// kind: topic | keyword | page-type | schema | depth
+/// status: open | in-progress | done | dismissed
+model ContentGap {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  kind   String
+  title  String
+  detail String?
+  query  String?
+
+  selfUrl       String?
+  selfWordCount Int?
+
+  competitorCount        Int     @default(0)
+  competitorIds          Json?
+  avgCompetitorWordCount Float?
+  bestCompetitorUrl      String?
+
+  searchVolume  Int?
+  relevance     Float?
+  businessValue Float?
+
+  status    String   @default("open")
+  aiUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  opportunity Opportunity?
+
+  @@index([projectId, status])
+}
+
+/// category: content | technical | onpage | performance | structured-data | internal-links
+/// effort: low | medium | high
+/// status: open | in-progress | done | dismissed
+model Opportunity {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  gapId String?     @unique
+  gap   ContentGap? @relation(fields: [gapId], references: [id], onDelete: Cascade)
+
+  competitorId String?
+  competitor   Competitor? @relation(fields: [competitorId], references: [id], onDelete: SetNull)
+
+  category  String
+  title     String
+  rationale String?
+  action    String?
+
+  /// OPPORTUNITY SCORE 0-100.
+  score Float
+  band  String
+  parts Json?
+
+  effort String?
+
+  status    String   @default("open")
+  aiUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, status, score])
 }

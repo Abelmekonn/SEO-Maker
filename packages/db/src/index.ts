@@ -9,10 +9,30 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export { PrismaClient } from "@prisma/client";
-export type { Competitor, CompetitorPage, Page, PerformanceAudit, Project } from "@prisma/client";
+export type {
+  Competitor,
+  CompetitorAnalysis,
+  CompetitorPage,
+  CompetitorQuery,
+  ContentGap,
+  Opportunity,
+  Page,
+  PerformanceAudit,
+  Project,
+  SerpResult,
+} from "@prisma/client";
 export {
   incrementPerfDone,
   readPerfProgress,
   writePerfProgress,
   type PerfProgress,
 } from "./perf-progress";
+export {
+  incrementCompetitorDone,
+  incrementCompetitorPhaseDone,
+  readCompetitorProgress,
+  resetCompetitorProgress,
+  setCompetitorStatus,
+  writeCompetitorPhase,
+  type CompetitorProgress,
+} from "./competitor-progress";

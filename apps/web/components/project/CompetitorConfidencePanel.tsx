@@ -1,0 +1,68 @@
+import { type ConfidenceBand, confidenceBandLabels } from "@seo-maker/core/scoring";
+import { Info } from "lucide-react";
+import Link from "next/link";
+import { CompetitorGauge } from "@/components/project/CompetitorGauge";
+
+/**
+ * Headline confidence for the strongest competitor, with the definition kept
+ * next to the number so it can never be mistaken for an SEO score.
+ */
+export function CompetitorConfidencePanel({
+  projectId,
+  competitorId,
+  domain,
+  confidence,
+  band,
+}: {
+  projectId: string;
+  competitorId: string | null;
+  domain: string | null;
+  confidence: number | null;
+  band: string | null;
+}) {
+  const typedBand = (band ?? null) as ConfidenceBand | null;
+
+  return (
+    <section className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
+      <div className="flex items-center gap-1.5">
+        <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
+          Competitor confidence
+        </h2>
+        <Info className="size-3.5 text-muted-soft" aria-hidden />
+      </div>
+
+      <div className="flex flex-col items-center gap-3">
+        <CompetitorGauge
+          value={confidence}
+          label={domain ? `${domain} competitor confidence` : "Competitor confidence"}
+          caption={typedBand ? confidenceBandLabels[typedBand] : undefined}
+        />
+        {domain ? (
+          <p className="text-center font-mono text-[12px] text-muted-foreground">{domain}</p>
+        ) : null}
+      </div>
+
+      <p className="text-sm leading-6 text-body">
+        Measures how strongly this domain competes with your website, based on shared search
+        queries, ranking positions, topical relevance and business similarity.
+      </p>
+
+      {confidence == null ? (
+        <p className="rounded-lg bg-canvas p-3 text-[12px] leading-5 text-muted-soft ring-1 ring-hairline">
+          Confidence needs search evidence. Adding a competitor by hand records who you compete
+          with, but not how often you appear for the same queries — run discovery with a search
+          provider to measure that.
+        </p>
+      ) : null}
+
+      {competitorId ? (
+        <Link
+          href={`/projects/${projectId}/competitors/${competitorId}`}
+          className="font-mono text-[12px] text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          How it is calculated →
+        </Link>
+      ) : null}
+    </section>
+  );
+}
