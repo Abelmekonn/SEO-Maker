@@ -43,47 +43,228 @@ model Project {
   compProviderOk Boolean   @default(false)
   compAiUsed     Boolean   @default(false)
 
+  /// analysisMode: quick | deep. Quick runs from a URL alone (Phase 0.6).
+  analysisMode String @default("quick")
+
+  // Business context for Deep analysis (Phase 0.5). All optional: Quick mode
+  // must keep working with none of it, and the AI layer stays conservative
+  // rather than inventing values that are missing here.
+  businessName        String?
+  businessType        String?
+  industry            String?
+  businessDescription String?
+  targetAudience      String?
+  targetLocation      String?
+  servicesProducts    Json?
+  primaryGoal         String?
+  targetKeywords      Json?
+  contextUpdatedAt    DateTime?
+
+  /// The crawl whose pages the dashboard shows. Older crawls are kept for history.
+  latestCrawlId String?
+
   createdAt         DateTime          @default(now())
   pages             Page[]
+  crawls            Crawl[]
   competitors       Competitor[]
   competitorQueries CompetitorQuery[]
   contentGaps       ContentGap[]
   opportunities     Opportunity[]
+  aiResults         AiResult[]
 
   @@index([userId])
 }
 
+/// One crawl run.
+///
+/// Replaces overwriting the project's pages in place, which wiped the previous
+/// state on every re-crawl and left nothing for the Fix -> Re-crawl -> Measure
+/// loop (PRD section 52) to compare against.
+///
+/// status: pending | crawling | analyzing | completed | failed | cancelled
+model Crawl {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  status   String  @default("pending")
+  maxPages Int     @default(1)
+  error    String?
+
+  // Reliability counters (PRD section 42). Failures are real rows now, not
+  // values that vanished when a request errored.
+  discovered Int @default(0)
+  queued     Int @default(0)
+  crawled    Int @default(0)
+  analyzed   Int @default(0)
+  failed     Int @default(0)
+  skipped    Int @default(0)
+
+  /// Requests spent, which exceeds `crawled` when sitemap URLs redirect onto each other.
+  requests Int @default(0)
+
+  // Site-wide audits, stored per crawl so a comparison matches like with like.
+  robotsAudit  Json?
+  sitemapAudit Json?
+  /// Seed plan summary: sections covered, deferred/duplicate/off-site counts.
+  seedPlan Json?
+
+  // Scores snapshotted at completion, so a comparison never has to re-derive
+  // them from pages that may since have been pruned.
+  seoScore       Float?
+  technicalScore Float?
+  onPageScore    Float?
+  issueCount     Int    @default(0)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  pages  Page[]
+  issues PageIssue[]
+
+  @@index([projectId, startedAt])
+}
+
+/// status: pending | crawling | analyzing | analyzed | failed | excluded
 model Page {
-  id            String              @id @default(cuid())
-  projectId     String
-  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Null only for the seed row created before the first crawl starts.
+  crawlId String?
+  crawl   Crawl?  @relation(fields: [crawlId], references: [id], onDelete: Cascade)
+
   url           String
   finalUrl      String?
   isHttps       Boolean?
   statusCode    Int?
   pageType      String?
+  /// 0-1 confidence from the deterministic classifier.
+  pageTypeScore Float?
   title         String?
   metaDesc      String?
   h1            String?
+  /// Multiple H1s are their own finding; presence alone was never enough.
+  h1Count       Int?
   h2Count       Int?
+  h3Count       Int?
   canonicalUrl  String?
   wordCount     Int?
   imageCount    Int?
   missingAlt    Int?
   internalLinks Int?
+  externalLinks Int?
   schemaCount   Int?
   robotsTxtUrl  String?
   robotsOk      Boolean?
   sitemapUrl    String?
   hasSitemap    Boolean?
   xRobotsTag    String?
+  robotsMeta    String?
   indexable     Boolean?
+
+  /// Whether the site's own sitemap lists this URL. Null when there is no sitemap.
+  /// This is what lets the product tell deliberate noindex from a contradiction.
+  inSitemap Boolean?
+  /// Whether robots.txt disallows this path for our crawler.
+  robotsDisallowed Boolean?
+
+  // Redirect and transport evidence. `finalUrl` used to be a copy of `url`, so
+  // no redirect was ever recorded on any page of any site.
+  redirectCount  Int?
+  responseTimeMs Int?
+  contentType    String?
+  language       String?
+  depth          Int?
+  /// How this URL entered the crawl: seed | sitemap | link.
+  discoveredVia  String?
+
+  // Phase 0.2 evidence. The counts above stay for the existing deterministic
+  // scoring; these carry the actual text and structure the AI layer needs and
+  // must not invent.
+  content     String?
+  contentHash String?
+  evidence    Json?
+
+  /// Why a fetch failed, so a failure is a visible row rather than a missing one.
+  errorType String?
+  error     String?
+
   seoSuggestion Json?
-  status        String              @default("pending")
-  createdAt     DateTime            @default(now())
+  status        String             @default("pending")
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
   performance   PerformanceAudit[]
+  issues        PageIssue[]
+  aiResults     AiResult[]
 
   @@index([projectId])
+  @@index([crawlId])
+  @@index([crawlId, status])
+}
+
+/// One deterministic finding, persisted rather than recomputed on every render.
+/// Shape matches PRD section 45 so the UI, scoring engine, AI layer and reports
+/// all consume the same record.
+///
+/// status: warning | fail    severity: low | medium | high | critical
+model PageIssue {
+  id      String @id @default(cuid())
+  pageId  String
+  page    Page   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  crawlId String
+  crawl   Crawl  @relation(fields: [crawlId], references: [id], onDelete: Cascade)
+
+  checkId        String
+  status         String
+  severity       String
+  message        String
+  evidence       String?
+  recommendation String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([pageId, checkId])
+  @@index([crawlId, severity])
+  @@index([crawlId, checkId])
+}
+
+/// Stored AI output (architecture section 13). Nothing writes this until Phase 1;
+/// it exists now so AI results never have to live permanently in a JSON column
+/// on Page, which the architecture explicitly warns against.
+///
+/// status: ok | invalid | failed
+model AiResult {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pageId    String?
+  page      Page?   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  feature String
+  mode    String @default("quick")
+
+  provider         String
+  model            String
+  promptVersion    String
+  knowledgeVersion String?
+  /// Hash of the evidence and context that produced this, for cache reuse.
+  inputHash String
+
+  output Json?
+  status String  @default("ok")
+  error  String?
+
+  inputTokens   Int?
+  outputTokens  Int?
+  estimatedCost Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, feature])
+  @@index([pageId, feature])
+  @@index([inputHash])
 }
 
 model PerformanceAudit {
@@ -100,6 +281,9 @@ model PerformanceAudit {
   cls           Float?
   tbt           Float?
   inp           Float?
+  /// Lab TTFB and Speed Index were computed but had nowhere to go.
+  ttfb          Float?
+  speedIndex    Float?
   rawData       Json?
   opportunities Json?
   diagnostics   Json?

@@ -8,15 +8,18 @@ if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
 
-export { PrismaClient } from "@prisma/client";
+export { Prisma, PrismaClient } from "@prisma/client";
 export type {
+  AiResult,
   Competitor,
   CompetitorAnalysis,
   CompetitorPage,
   CompetitorQuery,
   ContentGap,
+  Crawl,
   Opportunity,
   Page,
+  PageIssue,
   PerformanceAudit,
   Project,
   SerpResult,
