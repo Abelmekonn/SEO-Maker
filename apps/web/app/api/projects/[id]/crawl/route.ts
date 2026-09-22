@@ -5,33 +5,17 @@ import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { enqueueHomepageCrawl } from "@/lib/queue";
 import { findHomepage } from "@/lib/site-url";
 
-const RESET = {
-  status: "pending",
-  finalUrl: null,
-  isHttps: null,
-  statusCode: null,
-  title: null,
-  metaDesc: null,
-  h1: null,
-  h2Count: null,
-  canonicalUrl: null,
-  wordCount: null,
-  imageCount: null,
-  missingAlt: null,
-  internalLinks: null,
-  schemaCount: null,
-  robotsTxtUrl: null,
-  robotsOk: null,
-  sitemapUrl: null,
-  hasSitemap: null,
-  xRobotsTag: null,
-  indexable: null,
-};
-
-export async function POST(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+/**
+ * Queues a re-crawl.
+ *
+ * This used to null out every column on every page and set them back to
+ * pending, so the moment a user pressed "Crawl again" the previous results
+ * were gone — and if the new crawl failed there was nothing to fall back to.
+ * The worker now writes into a fresh `Crawl`, and the project only points at
+ * it once that run has pages, so the last good crawl stays readable
+ * throughout.
+ */
+export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "Sign in to run a crawl." }, { status: 401 });
@@ -55,10 +39,6 @@ export async function POST(
     where: { id: project.id },
     data: { status: "pending", maxPages },
   });
-  await prisma.page.updateMany({
-    where: { projectId: project.id },
-    data: RESET,
-  });
 
   try {
     await enqueueHomepageCrawl({
@@ -68,6 +48,10 @@ export async function POST(
     });
   } catch (error) {
     console.error("Failed to enqueue crawl", error);
+    await prisma.project.update({
+      where: { id: project.id },
+      data: { status: project.latestCrawlId ? "analyzed" : "pending" },
+    });
     return NextResponse.json(
       { error: "Queue is not running. Start Redis and the worker." },
       { status: 503 },
