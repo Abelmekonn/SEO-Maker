@@ -1,11 +1,19 @@
 import { assertSafeUrl, guardedLookup, safeFetch } from "@seo-maker/core/net";
+import { hostKey, normalizePageUrl } from "@seo-maker/core/crawl";
+import {
+  type RobotsGroup,
+  groupFor,
+  isPathDisallowed,
+  parseRobotsTxt,
+} from "@seo-maker/core/robots";
+import { parseSitemapXml } from "@seo-maker/core/sitemap";
+import { NON_CONTENT_SELECTOR, countWords, normalizeContent } from "@seo-maker/core/page";
 import {
   CheerioCrawler,
   type CheerioCrawlingContext,
   Configuration,
   NonRetryableError,
 } from "crawlee";
-import { type PageAudit, normalizePageUrl } from "./crawler.js";
 
 /**
  * Crawler for third-party competitor sites.
@@ -17,59 +25,39 @@ import { type PageAudit, normalizePageUrl } from "./crawler.js";
 
 const DEFAULT_MAX_PAGES = 25;
 
-function hostKey(hostname: string) {
-  return hostname.replace(/^www\./, "").toLowerCase();
-}
+/**
+ * Competitor pages only need the comparison fields, so this stays a narrow
+ * shape rather than the first-party `PageAudit`. Keeping them separate is what
+ * lets the first-party crawler grow its Phase 0 evidence fields without
+ * dragging a third-party crawl into storing page bodies it has no use for.
+ */
+export type CompetitorPageAudit = {
+  url: string;
+  finalUrl: string | null;
+  isHttps: boolean;
+  statusCode: number | null;
+  title: string | null;
+  metaDesc: string | null;
+  h1: string | null;
+  h2Count: number;
+  canonicalUrl: string | null;
+  wordCount: number;
+  imageCount: number;
+  missingAlt: number;
+  internalLinks: number;
+  schemaCount: number;
+  indexable: boolean;
+  xRobotsTag: string | null;
+};
 
 export type RobotsRules = {
   robotsTxtUrl: string;
   robotsOk: boolean;
   sitemapUrl: string | null;
   hasSitemap: boolean;
-  disallow: string[];
+  /** Rules that apply to our user agent, already selected from the file. */
+  group: RobotsGroup | null;
 };
-
-/** Parses the `*` (and our own) user-agent group out of robots.txt. */
-export function parseRobots(text: string): { disallow: string[]; sitemaps: string[] } {
-  const disallow: string[] = [];
-  const sitemaps: string[] = [];
-  let appliesToUs = false;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.replace(/#.*$/, "").trim();
-    if (!line) continue;
-    const [rawField, ...rest] = line.split(":");
-    const field = rawField.trim().toLowerCase();
-    const value = rest.join(":").trim();
-    if (!value && field !== "disallow") continue;
-
-    if (field === "user-agent") {
-      const agent = value.toLowerCase();
-      appliesToUs = agent === "*" || agent.includes("seo-maker");
-    } else if (field === "disallow" && appliesToUs) {
-      if (value) disallow.push(value);
-    } else if (field === "sitemap") {
-      sitemaps.push(value);
-    }
-  }
-
-  return { disallow, sitemaps };
-}
-
-/** Standard robots.txt prefix matching, with `*` and `$` wildcards. */
-export function isDisallowed(pathname: string, disallow: string[]): boolean {
-  return disallow.some((rule) => {
-    if (!rule) return false;
-    if (!rule.includes("*") && !rule.endsWith("$")) {
-      return pathname.startsWith(rule);
-    }
-    const pattern = rule
-      .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\*/g, ".*")
-      .replace(/\\\$$/, "$");
-    return new RegExp(`^${pattern}`).test(pathname);
-  });
-}
 
 async function fetchRobots(origin: string): Promise<RobotsRules> {
   const robotsTxtUrl = `${origin}/robots.txt`;
@@ -80,18 +68,18 @@ async function fetchRobots(origin: string): Promise<RobotsRules> {
       maxBytes: 512 * 1024,
     });
     if (response.status >= 400) {
-      return { robotsTxtUrl, robotsOk: false, sitemapUrl: null, hasSitemap: false, disallow: [] };
+      return { robotsTxtUrl, robotsOk: false, sitemapUrl: null, hasSitemap: false, group: null };
     }
-    const { disallow, sitemaps } = parseRobots(response.body);
+    const parsed = parseRobotsTxt(response.body);
     return {
       robotsTxtUrl,
       robotsOk: true,
-      sitemapUrl: sitemaps[0] ?? `${origin}/sitemap.xml`,
-      hasSitemap: sitemaps.length > 0,
-      disallow,
+      sitemapUrl: parsed.sitemaps[0] ?? `${origin}/sitemap.xml`,
+      hasSitemap: parsed.sitemaps.length > 0,
+      group: groupFor(parsed),
     };
   } catch {
-    return { robotsTxtUrl, robotsOk: false, sitemapUrl: null, hasSitemap: false, disallow: [] };
+    return { robotsTxtUrl, robotsOk: false, sitemapUrl: null, hasSitemap: false, group: null };
   }
 }
 
@@ -103,11 +91,8 @@ async function fetchSitemapUrls(sitemapUrl: string, siteHost: string, limit: num
       maxBytes: 2 * 1024 * 1024,
     });
     if (response.status >= 400) return [];
-    const locs = [...response.body.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((match) =>
-      match[1].trim().replace(/&amp;/g, "&"),
-    );
-    return locs
-      .map((url) => normalizePageUrl(url))
+    return parseSitemapXml(response.body)
+      .entries.map((entry) => normalizePageUrl(entry.loc))
       .filter((url): url is string => {
         if (!url) return false;
         try {
@@ -123,7 +108,7 @@ async function fetchSitemapUrls(sitemapUrl: string, siteHost: string, limit: num
 }
 
 export type CompetitorCrawlResult = {
-  pages: PageAudit[];
+  pages: CompetitorPageAudit[];
   robots: RobotsRules;
   blockedByRobots: number;
 };
@@ -131,7 +116,7 @@ export type CompetitorCrawlResult = {
 export async function crawlCompetitor(
   domain: string,
   maxPages = DEFAULT_MAX_PAGES,
-  hooks?: { onPage?: (audit: PageAudit) => Promise<void> },
+  hooks?: { onPage?: (audit: CompetitorPageAudit) => Promise<void> },
 ): Promise<CompetitorCrawlResult> {
   const origin = `https://${hostKey(domain)}`;
 
@@ -151,7 +136,7 @@ export async function crawlCompetitor(
   const seeds = [...new Set([entry.url.toString(), ...sitemapUrls])]
     .filter((url) => {
       try {
-        return !isDisallowed(new URL(url).pathname, robots.disallow);
+        return !isPathDisallowed(new URL(url).pathname, robots.group);
       } catch {
         return false;
       }
@@ -162,7 +147,7 @@ export async function crawlCompetitor(
     throw new NonRetryableError("robots.txt disallows crawling this site.");
   }
 
-  const pages: PageAudit[] = [];
+  const pages: CompetitorPageAudit[] = [];
   const seen = new Set<string>();
   let blockedByRobots = 0;
 
@@ -211,12 +196,12 @@ export async function crawlCompetitor(
         seen.add(loadedUrl);
 
         const loaded = new URL(loadedUrl);
-        if (isDisallowed(loaded.pathname, robots.disallow)) {
+        if (isPathDisallowed(loaded.pathname, robots.group)) {
           blockedByRobots += 1;
           return;
         }
 
-        const audit = extractAudit($, loadedUrl, loaded, response, robots);
+        const audit = extractAudit($, loadedUrl, loaded, response);
         pages.push(audit);
         if (hooks?.onPage) {
           await hooks.onPage(audit);
@@ -231,7 +216,7 @@ export async function crawlCompetitor(
               try {
                 const url = new URL(next);
                 if (hostKey(url.hostname) !== startHost) return false;
-                if (isDisallowed(url.pathname, robots.disallow)) return false;
+                if (isPathDisallowed(url.pathname, robots.group)) return false;
               } catch {
                 return false;
               }
@@ -266,8 +251,7 @@ function extractAudit(
   loadedUrl: string,
   loaded: URL,
   response: { statusCode?: number; headers?: Record<string, unknown> } | undefined,
-  robots: RobotsRules,
-): PageAudit {
+): CompetitorPageAudit {
   const clean = (value: string | undefined) => (value ?? "").replace(/\s+/g, " ").trim();
 
   const title = clean($("title").first().text());
@@ -281,7 +265,6 @@ function extractAudit(
     $('meta[name="robots"]').attr("content") ?? $('meta[name="googlebot"]').attr("content"),
   ).toLowerCase();
   const xRobotsTag = response?.headers?.["x-robots-tag"]?.toString()?.toLowerCase() ?? null;
-  const text = clean($("body").text());
   const images = $("img").toArray();
   const noindex =
     robotsMeta.includes("noindex") || (xRobotsTag ? xRobotsTag.includes("noindex") : false);
@@ -312,6 +295,16 @@ function extractAudit(
     }
   }
 
+  const schemaCount = $('script[type="application/ld+json"]')
+    .toArray()
+    .filter((script) => $(script).text().trim().length > 0).length;
+
+  // Read text last: this mutates the document. Without the removal, `.text()`
+  // includes <script> bodies, which inflated competitor word counts the same
+  // way it inflated our own and made every competitor look content-rich.
+  $(NON_CONTENT_SELECTOR).remove();
+  const content = normalizeContent($("body").text());
+
   return {
     url: loadedUrl,
     finalUrl: loadedUrl,
@@ -322,17 +315,11 @@ function extractAudit(
     h1: h1 || null,
     h2Count: $("h2").length,
     canonicalUrl,
-    wordCount: text ? text.split(" ").filter(Boolean).length : 0,
+    wordCount: countWords(content),
     imageCount: images.length,
     missingAlt: images.filter((img) => !$(img).attr("alt")?.trim()).length,
     internalLinks,
-    schemaCount: $('script[type="application/ld+json"]')
-      .toArray()
-      .filter((script) => $(script).text().trim().length > 0).length,
-    robotsTxtUrl: robots.robotsTxtUrl,
-    robotsOk: robots.robotsOk,
-    sitemapUrl: robots.sitemapUrl,
-    hasSitemap: robots.hasSitemap,
+    schemaCount,
     xRobotsTag,
     indexable: !noindex && (response?.statusCode ?? 0) < 400,
   };

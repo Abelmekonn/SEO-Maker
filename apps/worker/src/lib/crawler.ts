@@ -1,6 +1,54 @@
-import { CheerioCrawler, Configuration } from "crawlee";
+import { assertSafeUrl, createSafeUrlCache, guardedLookup, safeFetch } from "@seo-maker/core/net";
+import {
+  type SeedPlan,
+  hostKey,
+  normalizePageUrl,
+  pathDepth,
+  planSeeds,
+} from "@seo-maker/core/crawl";
+import { type PageEvidence, classifyPage, contentFingerprint } from "@seo-maker/core/page";
+import {
+  type RobotsAudit,
+  buildRobotsAudit,
+  groupFor,
+  isPathDisallowed,
+  parseRobotsTxt,
+} from "@seo-maker/core/robots";
+import {
+  type SitemapAudit,
+  type SitemapDocument,
+  type SitemapUrlEvidence,
+  buildSitemapAudit,
+  parseSitemapXml,
+} from "@seo-maker/core/sitemap";
+import { CheerioCrawler, Configuration, NonRetryableError } from "crawlee";
+import { extractPage } from "./extract.js";
 
-const SKIP_PATH = /\.(?:pdf|zip|png|jpe?g|gif|webp|svg|css|js|mjs|map|mp4|mp3|woff2?|ttf|ico|xml|json|txt)$/i;
+export { normalizePageUrl } from "@seo-maker/core/crawl";
+
+/**
+ * First-party site crawler.
+ *
+ * Rewritten to close defects found by crawling stripe.com end to end:
+ *
+ *  - the 100-page budget was spent in sitemap document order, which put 72 of
+ *    73 pages under /legal and never reached a product page (now `planSeeds`);
+ *  - word counts included <script> text, inflating them ~6.5x and disabling
+ *    the thin-content check on every page of every site (now `extractPage`);
+ *  - failed fetches were never written, so the database always reported zero
+ *    failures no matter how many requests errored;
+ *  - redirects were invisible: `finalUrl` was assigned a copy of `url`;
+ *  - robots.txt was scanned only for a `Sitemap:` line, so Disallow was ignored;
+ *  - the SSRF guards in core were wired into the competitor crawler only, and
+ *    the first-party path could reach private addresses.
+ */
+
+const MAX_SITEMAP_DOCUMENTS = 50;
+const MAX_SITEMAP_URLS = 10_000;
+const USER_AGENT = "SEO-Maker-Bot/0.1 (+https://seo-maker.app/bot)";
+
+/** Request slack above the page budget, to absorb URLs that redirect onto a known page. */
+const REQUEST_SLACK = 1.4;
 
 export type PageAudit = {
   url: string;
@@ -10,147 +58,349 @@ export type PageAudit = {
   title: string | null;
   metaDesc: string | null;
   h1: string | null;
+  h1Count: number;
   h2Count: number;
+  h3Count: number;
   canonicalUrl: string | null;
   wordCount: number;
   imageCount: number;
   missingAlt: number;
   internalLinks: number;
+  externalLinks: number;
   schemaCount: number;
   robotsTxtUrl: string | null;
   robotsOk: boolean;
   sitemapUrl: string | null;
   hasSitemap: boolean;
   xRobotsTag: string | null;
+  robotsMeta: string | null;
   indexable: boolean;
+  inSitemap: boolean | null;
+  robotsDisallowed: boolean;
+  pageType: string;
+  pageTypeScore: number;
+  language: string | null;
+  depth: number;
+  discoveredVia: DiscoveredVia;
+  redirectCount: number;
+  responseTimeMs: number | null;
+  contentType: string | null;
+  content: string;
+  contentHash: string;
+  evidence: PageEvidence;
+  status: "analyzed";
 };
 
-export type HomepageAudit = PageAudit;
+export type DiscoveredVia = "seed" | "sitemap" | "link";
 
-export function normalizePageUrl(value: string): string | null {
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
-    }
-    if (SKIP_PATH.test(parsed.pathname)) {
-      return null;
-    }
-    parsed.hash = "";
-    const pathname = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "");
-    return `${parsed.origin}${pathname}${parsed.search}`;
-  } catch {
-    return null;
-  }
-}
+/** A fetch that never produced a page. Recorded so failures stop disappearing. */
+export type PageFailure = {
+  url: string;
+  statusCode: number | null;
+  errorType: string;
+  error: string;
+  discoveredVia: DiscoveredVia;
+  depth: number;
+  status: "failed";
+};
 
-export async function crawlHomepageHtml(url: string): Promise<PageAudit> {
-  const pages = await crawlSite(url, 1);
-  const homepage = pages[0];
-  if (!homepage) {
-    throw new Error(`Could not fetch ${url}`);
-  }
-  return homepage;
-}
+export type CrawlSiteResult = {
+  pages: PageAudit[];
+  failures: PageFailure[];
+  robotsAudit: RobotsAudit;
+  sitemapAudit: SitemapAudit;
+  seedPlan: SeedPlan;
+  /** Requests actually spent, which exceeds `pages` when URLs redirect onto each other. */
+  requests: number;
+  /** URLs deliberately not analyzed: robots.txt, duplicates after redirect, over budget. */
+  skipped: number;
+};
+
+export type CrawlHooks = {
+  onPage?: (audit: PageAudit) => Promise<void>;
+  onFailure?: (failure: PageFailure) => Promise<void>;
+};
 
 export async function crawlSite(
   startUrl: string,
   maxPages: number,
-  hooks?: { onPage?: (audit: PageAudit) => Promise<void> },
-): Promise<PageAudit[]> {
-  const start = normalizePageUrl(startUrl);
-  if (!start) {
-    throw new Error(`Invalid start URL: ${startUrl}`);
+  hooks?: CrawlHooks,
+): Promise<CrawlSiteResult> {
+  const normalizedStart = normalizePageUrl(startUrl);
+  if (!normalizedStart) {
+    throw new NonRetryableError(`Invalid start URL: ${startUrl}`);
+  }
+
+  // Layer 0 of the SSRF defense: refuse the site before any request is made.
+  const entry = await assertSafeUrl(normalizedStart);
+  if (!entry.ok) {
+    throw new NonRetryableError(`Blocked start URL (${entry.reason}): ${entry.detail}`);
   }
 
   const limit = Math.max(1, Math.min(maxPages, 100));
-  const startHost = hostKey(new URL(start).hostname);
-  const robots = await fetchRobotsData(new URL(start).origin);
-  const sitemapUrls = robots.sitemapUrl
-    ? await fetchSitemapUrls(robots.sitemapUrl, startHost, limit)
-    : [];
-  const seeds = uniqueUrls([start, ...sitemapUrls]).slice(0, limit);
-  const results: PageAudit[] = [];
+  const origin = entry.url.origin;
+  const siteHost = hostKey(entry.url.hostname);
+
+  const robots = await readRobots(origin);
+  const group = robots.parsed ? groupFor(robots.parsed) : null;
+  const sitemap = await readSitemaps(robots.parsed?.sitemaps ?? [], origin, siteHost);
+
+  const plan = planSeeds({
+    start: normalizedStart,
+    sitemapUrls: sitemap.urls,
+    limit,
+    siteHost,
+    isDisallowed: (pathname) => isPathDisallowed(pathname, group),
+  });
+
+  const sitemapSet = new Set(sitemap.urls);
+  const robotsAudit = buildRobotsAudit({
+    url: robots.url,
+    status: robots.status,
+    parsed: robots.parsed,
+    group,
+    sitemapUrls: sitemap.urls.slice(0, 2000),
+  });
+
+  if (robotsAudit.blocksEverything) {
+    throw new NonRetryableError("robots.txt disallows crawling this site.");
+  }
+
+  // One DNS verdict per host per crawl. Without this, the per-request lookup
+  // floods the resolver and its transient failures surface as blocked pages.
+  const safeUrls = createSafeUrlCache();
+
+  const pages: PageAudit[] = [];
+  const failures: PageFailure[] = [];
   const seen = new Set<string>();
+  const discovery = new Map<string, DiscoveredVia>();
+  let requests = 0;
+  let skipped = 0;
+
+  for (const [index, url] of plan.seeds.entries()) {
+    discovery.set(url, index === 0 ? "seed" : "sitemap");
+  }
 
   const crawler = new CheerioCrawler(
     {
-      maxRequestsPerCrawl: limit,
-      maxConcurrency: 1,
+      // Slack above the page budget absorbs sitemap URLs that 301 onto a page
+      // we already hold. Those cost a request but must not cost a page slot —
+      // on stripe.com 24 of 97 successful fetches were exactly this, and the
+      // crawl came back 27 pages short of its budget.
+      maxRequestsPerCrawl: Math.ceil(limit * REQUEST_SLACK),
+      maxConcurrency: 2,
       maxRequestRetries: 1,
       requestHandlerTimeoutSecs: 30,
-      async requestHandler({ $, request, response, enqueueLinks }) {
-        const loadedUrl = normalizePageUrl(request.loadedUrl ?? request.url) ?? request.url;
+      preNavigationHooks: [
+        async ({ request }, gotOptions) => {
+          // Layer 1: validate every URL, including ones enqueueLinks found.
+          const check = await safeUrls.check(request.url);
+          if (!check.ok) {
+            // A resolver hiccup is transient. Throwing NonRetryableError here
+            // permanently marked healthy pages as blocked — 78 of them on one
+            // stripe.com run — because every request re-resolved the same host.
+            if (check.reason === "dns") {
+              throw new Error(`Could not resolve ${request.url}`);
+            }
+            throw new NonRetryableError(`Blocked URL (${check.reason})`);
+          }
+          if (gotOptions) {
+            // Layer 2: the DNS-rebinding defense. Resolves at connect time
+            // against the address the socket actually uses, so a TTL-0 flip
+            // between validation and fetch is still caught.
+            gotOptions.dnsLookup = guardedLookup;
+            gotOptions.maxRedirects = 5;
+            gotOptions.timeout = { request: 25_000 };
+            gotOptions.headers = { ...(gotOptions.headers ?? {}), "user-agent": USER_AGENT };
+            // Layer 3: re-validate each redirect hop rather than trusting got.
+            gotOptions.hooks = {
+              ...(gotOptions.hooks ?? {}),
+              beforeRedirect: [
+                async (options: { url?: URL | string }) => {
+                  const target = options.url;
+                  if (!target) {
+                    return;
+                  }
+                  const hop = await safeUrls.check(
+                    typeof target === "string" ? target : target.toString(),
+                  );
+                  if (!hop.ok) {
+                    throw new NonRetryableError(`Blocked redirect (${hop.reason})`);
+                  }
+                },
+              ],
+            };
+          }
+        },
+      ],
+
+      async requestHandler({ $, request, response, enqueueLinks, crawler: self }) {
+        requests += 1;
+
+        const requestedUrl = normalizePageUrl(request.url) ?? request.url;
+        const loadedUrl = normalizePageUrl(request.loadedUrl ?? request.url) ?? requestedUrl;
+
+        // A sitemap URL that redirects onto a page we already hold is evidence
+        // about the sitemap, not a new page.
         if (seen.has(loadedUrl)) {
+          skipped += 1;
+          if (requestedUrl !== loadedUrl && sitemapSet.has(requestedUrl)) {
+            sitemap.evidence.push({
+              url: requestedUrl,
+              statusCode: response?.statusCode ?? null,
+              finalUrl: loadedUrl,
+              indexable: null,
+            });
+          }
           return;
         }
-        seen.add(loadedUrl);
+        if (pages.length >= limit) {
+          skipped += 1;
+          return;
+        }
 
         const loaded = new URL(loadedUrl);
-        const title = $("title").first().text().replace(/\s+/g, " ").trim();
-        const metaDesc = (
-          $('meta[name="description"]').attr("content") ??
-          $('meta[property="og:description"]').attr("content") ??
-          ""
-        )
-          .replace(/\s+/g, " ")
-          .trim();
-        const h1 = $("h1").first().text().replace(/\s+/g, " ").trim();
-        const canonical = $('link[rel="canonical"]').attr("href")?.trim() ?? "";
-        const robotsMeta = (
-          $('meta[name="robots"]').attr("content") ??
-          $('meta[name="googlebot"]').attr("content") ??
-          ""
-        )
-          .toLowerCase()
-          .trim();
-        const xRobotsTag = response?.headers?.["x-robots-tag"]?.toString()?.toLowerCase() ?? null;
-        const text = $("body").text().replace(/\s+/g, " ").trim();
-        const images = $("img").toArray();
-        const missingAlt = images.filter((img) => !$(img).attr("alt")?.trim()).length;
+
+        // A redirect can leave the site entirely: stripe.com/bridge answers
+        // from bridge.xyz. That is a fact about the sitemap, not a page of
+        // this site, and storing it would audit someone else's domain.
+        if (hostKey(loaded.hostname) !== siteHost) {
+          skipped += 1;
+          if (sitemapSet.has(requestedUrl)) {
+            sitemap.evidence.push({
+              url: requestedUrl,
+              statusCode: response?.statusCode ?? null,
+              finalUrl: loadedUrl,
+              indexable: null,
+            });
+          }
+          return;
+        }
+
+        if (isPathDisallowed(loaded.pathname, group)) {
+          skipped += 1;
+          return;
+        }
+
+        seen.add(loadedUrl);
+        seen.add(requestedUrl);
+
+        const extracted = extractPage($, loadedUrl);
+        const headers = response?.headers ?? {};
+        const xRobotsTag = headers["x-robots-tag"]?.toString()?.toLowerCase() ?? null;
+        const statusCode = response?.statusCode ?? null;
         const noindex =
-          robotsMeta.includes("noindex") || (xRobotsTag ? xRobotsTag.includes("noindex") : false);
+          (extracted.robotsMeta?.includes("noindex") ?? false) ||
+          (xRobotsTag?.includes("noindex") ?? false);
+
+        const classification = classifyPage({
+          url: loadedUrl,
+          title: extracted.title,
+          h1: extracted.h1,
+          schemaTypes: extracted.schemaTypes,
+          wordCount: extracted.wordCount,
+        });
+
+        const via = discovery.get(requestedUrl) ?? discovery.get(loadedUrl) ?? "link";
+        const redirected = loadedUrl !== requestedUrl;
 
         const audit: PageAudit = {
           url: loadedUrl,
-          finalUrl: loadedUrl,
+          // Set only when the URL we asked for is not the one that answered,
+          // so `finalUrl` means "this redirected" rather than repeating `url`.
+          // It used to be assigned a copy of `url`, so no page on any site
+          // ever recorded a redirect.
+          finalUrl: redirected ? loadedUrl : null,
           isHttps: loaded.protocol === "https:",
-          statusCode: response?.statusCode ?? null,
-          title: title || null,
-          metaDesc: metaDesc || null,
-          h1: h1 || null,
-          h2Count: $("h2").length,
-          canonicalUrl: canonical ? toAbsoluteUrl(canonical, loadedUrl) : null,
-          wordCount: text ? text.split(" ").filter(Boolean).length : 0,
-          imageCount: images.length,
-          missingAlt,
-          internalLinks: countInternalLinks(
-            $("a[href]").toArray().map((anchor) => $(anchor).attr("href")),
-            loaded,
-          ),
-          schemaCount: $('script[type="application/ld+json"]')
-            .toArray()
-            .filter((script) => $(script).text().trim().length > 0).length,
-          robotsTxtUrl: robots.robotsTxtUrl,
-          robotsOk: robots.robotsOk,
-          sitemapUrl: robots.sitemapUrl,
-          hasSitemap: robots.hasSitemap,
+          statusCode,
+          title: extracted.title,
+          metaDesc: extracted.metaDesc,
+          h1: extracted.h1,
+          h1Count: extracted.h1Count,
+          h2Count: extracted.h2Count,
+          h3Count: extracted.h3Count,
+          canonicalUrl: extracted.canonicalUrl,
+          wordCount: extracted.wordCount,
+          imageCount: extracted.imageCount,
+          missingAlt: extracted.missingAlt,
+          internalLinks: extracted.internalLinks,
+          externalLinks: extracted.externalLinks,
+          schemaCount: extracted.schemaCount,
+          robotsTxtUrl: robotsAudit.url,
+          robotsOk: robotsAudit.found,
+          sitemapUrl: sitemap.primaryUrl,
+          hasSitemap: robotsAudit.hasSitemapDirective || sitemap.documents.some((doc) => doc.ok),
           xRobotsTag,
-          indexable: !noindex && (response?.statusCode ?? 0) < 400,
+          robotsMeta: extracted.robotsMeta,
+          indexable: !noindex && (statusCode ?? 0) < 400,
+          // Null when the site publishes no sitemap at all, which the
+          // indexability rule reads as "cannot corroborate" rather than
+          // "deliberately left out".
+          inSitemap: sitemap.documents.some((doc) => doc.ok) ? sitemapSet.has(loadedUrl) : null,
+          robotsDisallowed: isPathDisallowed(loaded.pathname, group),
+          pageType: classification.type,
+          pageTypeScore: classification.confidence,
+          language: extracted.language,
+          depth: pathDepth(loadedUrl),
+          discoveredVia: via,
+          redirectCount: redirected ? 1 : 0,
+          responseTimeMs: null,
+          contentType: headers["content-type"]?.toString() ?? null,
+          content: extracted.content,
+          contentHash: contentFingerprint(extracted.content),
+          evidence: {
+            ...extracted.evidence,
+            redirectChain: redirected
+              ? [{ from: requestedUrl, to: loadedUrl, status: statusCode ?? 301 }]
+              : [],
+          },
+          status: "analyzed",
         };
 
-        results.push(audit);
-        if (hooks?.onPage) {
-          await hooks.onPage(audit);
+        pages.push(audit);
+        if (sitemapSet.has(requestedUrl)) {
+          sitemap.evidence.push({
+            url: requestedUrl,
+            statusCode: audit.statusCode,
+            finalUrl: audit.url,
+            indexable: audit.indexable,
+          });
+        }
+        await hooks?.onPage?.(audit);
+
+        if (pages.length >= limit) {
+          // Stop now rather than letting queued requests drain the slack
+          // budget fetching pages we would immediately discard.
+          await self.autoscaledPool?.abort();
+          return;
         }
 
+        // Links only fill budget the sitemap left unused. On a site with a good
+        // sitemap this rarely fires; on one without, it is the only source.
         if (limit > 1) {
           await enqueueLinks({
             strategy: "same-domain",
             transformRequestFunction: (req) => {
-              const next = normalizePageUrl(req.url);
-              if (!next || seen.has(next) || hostKey(new URL(next).hostname) !== startHost) {
+              if (pages.length >= limit) {
                 return false;
+              }
+              const next = normalizePageUrl(req.url);
+              if (!next || seen.has(next)) {
+                return false;
+              }
+              try {
+                const target = new URL(next);
+                if (hostKey(target.hostname) !== siteHost) {
+                  return false;
+                }
+                if (isPathDisallowed(target.pathname, group)) {
+                  return false;
+                }
+              } catch {
+                return false;
+              }
+              if (!discovery.has(next)) {
+                discovery.set(next, "link");
               }
               req.url = next;
               req.uniqueKey = next;
@@ -159,120 +409,232 @@ export async function crawlSite(
           });
         }
       },
+
+      /**
+       * A failed fetch is a row, not a hole.
+       *
+       * Nothing was written here before, and the job then deleted any page not
+       * re-saved, so the three PDF failures on stripe.com left the database
+       * reporting zero failures.
+       */
+      async failedRequestHandler({ request, response }, error) {
+        requests += 1;
+        const url = normalizePageUrl(request.url) ?? request.url;
+        if (seen.has(url)) {
+          return;
+        }
+        seen.add(url);
+
+        const failure: PageFailure = {
+          url,
+          statusCode: response?.statusCode ?? null,
+          errorType: classifyError(error, response?.statusCode ?? null),
+          error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+          discoveredVia: discovery.get(url) ?? "link",
+          depth: pathDepth(url),
+          status: "failed",
+        };
+
+        failures.push(failure);
+        if (sitemapSet.has(url)) {
+          sitemap.evidence.push({
+            url,
+            statusCode: failure.statusCode,
+            finalUrl: null,
+            indexable: null,
+          });
+        }
+        await hooks?.onFailure?.(failure);
+      },
     },
     new Configuration({ persistStorage: false, systemInfoV2: false }),
   );
 
-  await crawler.run(
-    seeds.map((url) => ({
-      url,
-      uniqueKey: url,
-    })),
-  );
+  await crawler.run(plan.seeds.map((url) => ({ url, uniqueKey: url })));
 
-  if (results.length === 0) {
-    throw new Error(`Could not fetch ${start}`);
+  if (pages.length === 0 && failures.length === 0) {
+    throw new Error(`Could not fetch ${normalizedStart}`);
   }
 
-  return results;
+  return {
+    pages,
+    failures,
+    robotsAudit,
+    sitemapAudit: buildSitemapAudit({
+      documents: sitemap.documents,
+      urlCount: sitemap.urls.length,
+      offSiteCount: plan.offSite,
+      duplicateCount: plan.duplicates,
+      disallowedCount: plan.disallowed,
+      evidence: sitemap.evidence,
+    }),
+    seedPlan: plan,
+    requests,
+    skipped,
+  };
 }
 
-function hostKey(hostname: string) {
-  return hostname.replace(/^www\./, "").toLowerCase();
+/** Single-page path, used when a project is first created. */
+export async function crawlHomepageHtml(url: string): Promise<PageAudit> {
+  const result = await crawlSite(url, 1);
+  const homepage = result.pages[0];
+  if (!homepage) {
+    throw new Error(`Could not fetch ${url}`);
+  }
+  return homepage;
 }
 
-function uniqueUrls(urls: string[]) {
-  return [...new Set(urls.filter(Boolean))];
+function classifyError(error: unknown, status: number | null): string {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (status != null && status >= 500) return "server-error";
+  if (status != null && status >= 400) return "client-error";
+  if (message.includes("content-type")) return "not-html";
+  if (message.includes("timeout") || message.includes("timedout")) return "timeout";
+  if (message.includes("blocked")) return "blocked";
+  if (message.includes("enotfound") || message.includes("dns")) return "dns";
+  if (message.includes("econnreset") || message.includes("socket")) return "connection";
+  if (message.includes("certificate") || message.includes("ssl")) return "tls";
+  return "unknown";
 }
 
-function toAbsoluteUrl(rawHref: string, base: string): string | null {
-  return normalizePageUrl(new URL(rawHref, base).toString());
-}
-
-function countInternalLinks(hrefs: Array<string | undefined>, base: URL): number {
-  const originHost = hostKey(base.hostname);
-  return hrefs.reduce((count, href) => {
-    if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) {
-      return count;
-    }
-    const target = normalizePageUrl(new URL(href, base).toString());
-    if (!target) {
-      return count;
-    }
-    return hostKey(new URL(target).hostname) === originHost ? count + 1 : count;
-  }, 0);
-}
-
-async function fetchRobotsData(origin: string) {
-  const robotsTxtUrl = `${origin}/robots.txt`;
+async function readRobots(origin: string) {
+  const url = `${origin}/robots.txt`;
   try {
-    const response = await fetch(robotsTxtUrl, {
-      method: "GET",
-      redirect: "follow",
-      headers: { "user-agent": "SEO-Maker-Bot/0.1" },
+    const response = await safeFetch(url, {
+      allowAnyContentType: true,
+      timeoutMs: 10_000,
+      maxBytes: 512 * 1024,
+      headers: { "user-agent": USER_AGENT },
     });
-    if (!response.ok) {
-      return { robotsTxtUrl, robotsOk: false, sitemapUrl: null as string | null, hasSitemap: false };
+    if (response.status >= 400) {
+      return { url, status: response.status, parsed: null };
     }
-
-    const text = await response.text();
-    const sitemapMatch = text.match(/^\s*Sitemap:\s*(\S+)\s*$/im);
-    const sitemapUrl = sitemapMatch?.[1]?.trim() ?? `${origin}/sitemap.xml`;
-    return {
-      robotsTxtUrl,
-      robotsOk: true,
-      sitemapUrl,
-      hasSitemap: Boolean(sitemapMatch?.[1]),
-    };
+    return { url, status: response.status, parsed: parseRobotsTxt(response.body) };
   } catch {
-    return { robotsTxtUrl, robotsOk: false, sitemapUrl: null as string | null, hasSitemap: false };
+    return { url, status: null as number | null, parsed: null };
   }
 }
 
-async function fetchSitemapUrls(sitemapUrl: string, siteHost: string, limit: number) {
-  const urls = await readSitemapLocs(sitemapUrl, 0);
-  return urls
-    .map((url) => normalizePageUrl(url))
-    .filter((url): url is string => {
-      if (!url) {
-        return false;
-      }
-      return hostKey(new URL(url).hostname) === siteHost;
-    })
-    .slice(0, limit);
-}
+type SitemapRead = {
+  documents: SitemapDocument[];
+  urls: string[];
+  primaryUrl: string | null;
+  evidence: SitemapUrlEvidence[];
+};
 
-async function readSitemapLocs(url: string, depth: number): Promise<string[]> {
-  if (depth > 2) {
-    return [];
-  }
+/**
+ * Reads every sitemap the site declares, following index documents one level.
+ *
+ * The old version read the first five partitions of an index and stopped at
+ * 200 URLs, so on a partitioned sitemap it only ever saw the opening slice of
+ * the site. Combined with in-order seeding that is how a whole 100-page crawl
+ * of stripe.com ended up inside /legal.
+ */
+async function readSitemaps(
+  declared: string[],
+  origin: string,
+  siteHost: string,
+): Promise<SitemapRead> {
+  const roots = declared.length > 0 ? declared : [`${origin}/sitemap.xml`];
+  const documents: SitemapDocument[] = [];
+  const urls: string[] = [];
+  const seenUrls = new Set<string>();
+  const visited = new Set<string>();
+  const queue: Array<{ url: string; depth: number }> = roots.map((url) => ({ url, depth: 0 }));
 
-  try {
-    const response = await fetch(url, {
-      headers: { "user-agent": "SEO-Maker-Bot/0.1" },
-      redirect: "follow",
-    });
-    if (!response.ok) {
-      return [];
+  while (queue.length > 0 && documents.length < MAX_SITEMAP_DOCUMENTS) {
+    const next = queue.shift();
+    if (!next || visited.has(next.url)) {
+      continue;
     }
-    const xml = await response.text();
-    const locs = [...xml.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map((match) =>
-      match[1].trim().replace(/&amp;/g, "&"),
-    );
+    visited.add(next.url);
 
-    if (xml.includes("<sitemapindex") && depth < 2) {
-      const nested: string[] = [];
-      for (const child of locs.slice(0, 5)) {
-        nested.push(...(await readSitemapLocs(child, depth + 1)));
-        if (nested.length >= 200) {
-          break;
+    const read = await readOneSitemap(next.url);
+    documents.push(read.document);
+
+    if (!read.parsed) {
+      continue;
+    }
+
+    if (read.parsed.kind === "index" && next.depth < 2) {
+      for (const entry of read.parsed.entries) {
+        queue.push({ url: entry.loc, depth: next.depth + 1 });
+      }
+      continue;
+    }
+
+    for (const entry of read.parsed.entries) {
+      if (urls.length >= MAX_SITEMAP_URLS) {
+        break;
+      }
+      const normalized = normalizePageUrl(entry.loc);
+      if (!normalized || seenUrls.has(normalized)) {
+        continue;
+      }
+      seenUrls.add(normalized);
+      try {
+        if (hostKey(new URL(normalized).hostname) !== siteHost) {
+          continue;
         }
+      } catch {
+        continue;
       }
-      return nested;
+      urls.push(normalized);
+    }
+  }
+
+  return { documents, urls, primaryUrl: roots[0] ?? null, evidence: [] };
+}
+
+async function readOneSitemap(url: string) {
+  try {
+    const response = await safeFetch(url, {
+      allowAnyContentType: true,
+      timeoutMs: 15_000,
+      maxBytes: 8 * 1024 * 1024,
+      headers: { "user-agent": USER_AGENT },
+    });
+
+    if (response.status >= 400) {
+      return {
+        parsed: null,
+        document: {
+          url,
+          kind: "unknown" as const,
+          status: response.status,
+          ok: false,
+          entryCount: 0,
+          malformedCount: 0,
+          error: `HTTP ${response.status}`,
+        },
+      };
     }
 
-    return locs;
-  } catch {
-    return [];
+    const parsed = parseSitemapXml(response.body);
+    return {
+      parsed,
+      document: {
+        url,
+        kind: parsed.kind,
+        status: response.status,
+        ok: true,
+        entryCount: parsed.entries.length,
+        malformedCount: parsed.malformed.length,
+        error: null,
+      },
+    };
+  } catch (error) {
+    return {
+      parsed: null,
+      document: {
+        url,
+        kind: "unknown" as const,
+        status: null,
+        ok: false,
+        entryCount: 0,
+        malformedCount: 0,
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 200),
+      },
+    };
   }
 }

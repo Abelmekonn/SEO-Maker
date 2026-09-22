@@ -111,6 +111,8 @@ async function saveResult(pageId: string, result: PageSpeedResult) {
       cls: result.cls,
       tbt: result.tbt,
       inp: result.inp,
+      ttfb: result.ttfb,
+      speedIndex: result.speedIndex,
       rawData: result.rawData as object,
       opportunities: result.opportunities,
       diagnostics: result.diagnostics,
