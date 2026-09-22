@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEO Maker — Knowledge Base &amp; Phase 1 Guide</title>
+<style>
+  :root {
+    --ink: #16181d;
+    --muted: #5b6370;
+    --line: #e2e5ea;
+    --bg: #ffffff;
+    --soft: #f6f7f9;
+    --accent: #1f6feb;
+    --good: #1a7f37;
+    --warn: #9a6700;
+    --bad: #b42318;
+    --code-bg: #f4f5f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e7e9ee; --muted: #9aa3b2; --line: #2a2f3a; --bg: #14161a;
+      --soft: #1b1e24; --accent: #6ea8ff; --good: #5bc271; --warn: #d9a441;
+      --bad: #ef6f62; --code-bg: #1b1e24;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 16px 120px; }
+  h1 { font-size: 2.1rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 1.35rem; margin: 56px 0 14px; padding-top: 22px;
+    border-top: 1px solid var(--line); letter-spacing: -0.01em;
+  }
+  h3 { font-size: 1.05rem; margin: 30px 0 8px; }
+  h4 { font-size: 0.95rem; margin: 22px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  p, li { color: var(--ink); }
+  .lede { color: var(--muted); font-size: 1.06rem; margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: .88rem; margin: 18px 0 0; }
+  code, kbd {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: .875em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-size: .82rem; line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: .9rem; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; }
+  tbody tr:last-child td { border-bottom: none; }
+  .card { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 18px 0; }
+  .card > :first-child { margin-top: 0; }
+  .card > :last-child { margin-bottom: 0; }
+  .callout { border-left: 3px solid var(--accent); background: var(--soft); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.bad { border-left-color: var(--bad); }
+  .callout.good { border-left-color: var(--good); }
+  .callout p { margin: 6px 0; }
+  .callout > :first-child { margin-top: 0; }
+  .callout > :last-child { margin-bottom: 0; }
+  .pill { display: inline-block; font-size: .72rem; font-weight: 600; padding: 2px 8px;
+          border-radius: 999px; background: var(--code-bg); color: var(--muted); letter-spacing: .03em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 18px 0; }
+  .stat { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .stat b { display: block; font-size: 1.6rem; line-height: 1.1; letter-spacing: -0.02em; }
+  .stat span { color: var(--muted); font-size: .82rem; }
+  .flow { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .8rem; line-height: 1.9;
+          background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; overflow-x: auto; }
+  .bad-t { color: var(--bad); font-weight: 600; }
+  .good-t { color: var(--good); font-weight: 600; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  a { color: var(--accent); }
+  hr { border: none; border-top: 1px solid var(--line); margin: 40px 0; }
+  .toc { columns: 2; column-gap: 28px; font-size: .92rem; }
+  .toc a { text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  @media (max-width: 640px) { .toc { columns: 1; } .wrap { padding: 32px 16px 80px; } }
+  @media print {
+    :root { --ink: #000; --muted: #444; --line: #ccc; --bg: #fff; --soft: #f7f7f7; --code-bg: #f2f2f2; }
+    body { font-size: 10.5pt; }
+    .wrap { max-width: none; padding: 0; }
+    h2 { page-break-after: avoid; break-after: avoid; }
+    pre, table, .card, .callout, .flow { page-break-inside: avoid; break-inside: avoid; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>SEO Maker — Knowledge Base &amp; Phase 1</h1>
+<p class="lede">What was built, what each piece does, and a full worked example of the system
+turning one crawled page into a grounded recommendation.</p>
+<p class="meta">Branch <code>feat/ai-analysis</code> · 23 September 2026 · 173 knowledge items ·
+259 tests passing</p>
+
+<div class="callout no-print">
+  <p><strong>Want this as a PDF?</strong> Press <kbd>Ctrl</kbd>+<kbd>P</kbd> and choose
+  “Save as PDF”. The page is styled for print.</p>
+</div>
+
+<h2 id="toc">Contents</h2>
+<div class="toc">
+  <p><a href="#what">1. What this is</a><br>
+  <a href="#problem">2. The problem it solves</a><br>
+  <a href="#kb">3. The knowledge base</a><br>
+  <a href="#item">4. Anatomy of a knowledge item</a><br>
+  <a href="#policies">5. Policies — the decided conflicts</a><br>
+  <a href="#phase1">6. Phase 1: the AI foundation</a><br>
+  <a href="#files">7. Every file and what it does</a><br>
+  <a href="#example">8. Worked example, end to end</a><br>
+  <a href="#run">9. How to run it</a><br>
+  <a href="#next">10. What Phase 2 adds</a></p>
+</div>
+
+<h2 id="what">1. What this is</h2>
+
+<p>Two things were built, and they fit together:</p>
+
+<div class="grid">
+  <div class="stat"><b>173</b><span>knowledge items, each one claim with a traceable source</span></div>
+  <div class="stat"><b>7</b><span>policies — conflicts decided, not left open</span></div>
+  <div class="stat"><b>8</b><span>primary sources read end to end</span></div>
+  <div class="stat"><b>259</b><span>tests passing (224 core + 35 new)</span></div>
+</div>
+
+<p><strong>The knowledge base</strong> is a curated corpus of SEO and GEO knowledge. Every item
+carries the claim, the evidence behind it, the scope where it applies, the scope where it does
+<em>not</em>, and a citation back to a document archived on disk.</p>
+
+<p><strong>The Phase 1 AI foundation</strong> is the machinery that retrieves that knowledge,
+assembles it with real crawl evidence, calls a model, validates what comes back against a strict
+contract, caches it, and records it. No feature code ever talks to a model directly.</p>
+
+<h2 id="problem">2. The problem it solves</h2>
+
+<p>An SEO tool with an LLM bolted on produces confident nonsense. It says “keep your title under
+60 characters” because that sentence appears ten thousand times on the internet — not because
+Google says it. Google does not say it.</p>
+
+<div class="callout bad">
+<p><strong>The failure mode.</strong> The crawler finds a fact (“this title is 78 characters”).
+The model fills the gap between fact and advice from its training data, which is a blend of
+correct documentation and a decade of repeated folklore. The user gets folklore in a tool that
+looks authoritative.</p>
+</div>
+
+<p>The fix is to give the model the actual documentation, with the limits attached, and to make
+it structurally hard to say the folklore. That is what the corpus and the policies are for.</p>
+
+<h3>Three real corrections this produced</h3>
+
+<table>
+<thead><tr><th>Widely believed</th><th>What the source actually says</th></tr></thead>
+<tbody>
+<tr><td>Pages need exactly one H1, in strict heading order</td>
+<td>“From Google Search perspective, it doesn’t matter if you’re using them out of order… there’s
+no magical, ideal amount of headings.” — SEO Starter Guide</td></tr>
+<tr><td>E-E-A-T is a ranking factor you can improve and measure</td>
+<td>“Thinking E-E-A-T is a ranking factor. <strong>No, it’s not.</strong>” — SEO Starter Guide</td></tr>
+<tr><td>Google prefers longer content; aim for a word count</td>
+<td>“Are you writing to a particular word count because you’ve heard Google has a preferred word
+count? <strong>(No, we don’t.)</strong>” — helpful-content guidance</td></tr>
+</tbody>
+</table>
+
+<h2 id="kb">3. The knowledge base</h2>
+
+<p>Eight primary documents were converted with <code>pdftotext</code> and read in full — not
+sampled. Everything extracted points back to a section of one of them.</p>
+
+<table>
+<thead><tr><th>Source</th><th>Type</th><th>Items</th></tr></thead>
+<tbody>
+<tr><td>Google SEO Starter Guide <span class="pill">upd. 2025-12-10</span></td><td>Official</td><td>29</td></tr>
+<tr><td>Google General Guidelines (rater guidelines, 182pp) <span class="pill">2025-09-11</span></td><td>Official</td><td>27</td></tr>
+<tr><td>Google generative-AI optimisation guide <span class="pill">upd. 2026-07-10</span></td><td>Official</td><td>25</td></tr>
+<tr><td>Google helpful-content guidance <span class="pill">upd. 2025-12-10</span></td><td>Official</td><td>15</td></tr>
+<tr><td>IETF RFC 9309 — Robots Exclusion Protocol <span class="pill">2022-09</span></td><td>Standard</td><td>14</td></tr>
+<tr><td>Aggarwal et al., GEO (KDD ’24) <span class="pill">2024-06-28</span></td><td>Research</td><td>11</td></tr>
+<tr><td>Broder, A taxonomy of web search <span class="pill">2002</span></td><td>Research</td><td>5</td></tr>
+<tr><td>Google rater guidelines overview (36pp) <span class="pill">2023-11</span></td><td>Official</td><td>2</td></tr>
+</tbody>
+</table>
+
+<h3>Four kinds of knowledge, kept apart</h3>
+
+<table>
+<thead><tr><th>Type</th><th>Count</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>authoritative</code></td><td>129</td><td>Official documentation or a ratified standard. Requires an official/standard source — the build fails otherwise.</td></tr>
+<tr><td><code>myth</code></td><td>19</td><td>A claim the sources do <em>not</em> support. Exists so the model can contradict it. Never emitted as advice.</td></tr>
+<tr><td><code>research</code></td><td>18</td><td>Studies and benchmarks, with method and population preserved.</td></tr>
+<tr><td><code>heuristic</code></td><td>7</td><td>Practitioner convention. Never presented as an engine requirement.</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<p><strong>Three evidence axes, deliberately separate.</strong> <code>knowledgeType</code> is what
+kind of knowledge it is. <code>claimType</code> is how strong the claim is.
+<code>evidenceStrength</code> is how good the evidence is.</p>
+<p>A rater-guideline item is <code>authoritative</code> (Google published it) but only
+<code>evaluation_criterion</code> (it describes what human raters judge, not what the algorithm
+does). Collapsing those two is exactly how “E-E-A-T is a ranking factor” gets into a tool.</p>
+</div>
+
+<h2 id="item">4. Anatomy of a knowledge item</h2>
+
+<p>Here is a real item, trimmed to the fields that matter. This is the one that fires when a
+site’s <code>robots.txt</code> returns a server error.</p>
+
+<pre><code>{
+  "id": "seo-tech-robots-5xx-disallow",
+  "knowledgeType": "authoritative",
+  "claimType": "specification_rule",
+  "evidenceStrength": "strong",
+
+  "title": "A 5xx or unreachable robots.txt means crawlers must assume complete disallow",
+
+  "principle": "RFC 9309 Section 2.3.1.4 states that if robots.txt is unreachable due to
+                server or network errors, the file is undefined and the crawler MUST assume
+                complete disallow...",
+
+  "whyItMatters": "This is one of the few single-file failures that can take a whole site out
+                   of crawl. It deserves the highest technical severity SEO Maker can assign.",
+
+  "appliesWhen":      ["The crawl receives a 5xx response when fetching /robots.txt", ...],
+  "doesNotApplyWhen": ["The response is 4xx, which the standard treats as no restrictions", ...],
+
+  "limitations": "Exact retry windows and cache retention vary by implementation; the 30-day
+                  figure is an example in the standard, not a required threshold.",
+
+  "checks": ["robots", "robots_audit", "crawl_plan"],
+
+  "source": {
+    "name":     "RFC 9309 - Robots Exclusion Protocol",
+    "location": "Section 2.3.1.4 (\"Unreachable\" Status), page 8",
+    "quote":    "If the robots.txt file is unreachable due to server or network errors, this
+                 means the robots.txt file is undefined and the crawler MUST assume complete
+                 disallow.",
+    "localPath": "knowledge/raw/seo/Robots Exclusion Protocol.pdf"
+  }
+}</code></pre>
+
+<p>Four fields do the heavy lifting:</p>
+
+<ul>
+<li><code>checks</code> — binds the item to real <code>CheckId</code> values in
+<code>packages/core/src/scoring/page-audit.ts</code>. This is how retrieval works: an exact join,
+not a similarity guess.</li>
+<li><code>doesNotApplyWhen</code> and <code>limitations</code> — mandatory. An item with no stated
+limit is usually an overclaim, and the build rejects an empty <code>limitations</code>.</li>
+<li><code>source.quote</code> + <code>source.location</code> — present only when the document was
+actually read. Never fabricated.</li>
+</ul>
+
+<div class="callout good">
+<p><strong>The check that makes fabricated citations structurally impossible:</strong> the build
+script refuses to emit the corpus if an item is marked unverified <em>yet carries a quote</em>.
+You cannot accidentally invent a citation and have it ship.</p>
+</div>
+
+<p>128 of 173 items are verified against a locally archived source. The other 45 came from the
+earlier seed, cite documents not in <code>raw/</code>, and carry <strong>no quote and no section
+reference</strong> — because none was verified.</p>
+
+<h2 id="policies">5. Policies — the decided conflicts</h2>
+
+<p>Extraction turned up seven places where sources disagreed, or where the documentation
+contradicts what the product’s own code says. Each one is <em>decided</em>, not left as an open
+question for the model to arbitrate at generation time.</p>
+
+<table>
+<thead><tr><th>Policy</th><th>Decision</th></tr></thead>
+<tbody>
+<tr><td><code>policy-word-count</code></td><td>The 300-word threshold is an internal trigger. Never surface the number.</td></tr>
+<tr><td><code>policy-headings</code></td><td>h1/h2 findings are readability and accessibility, never a Google requirement.</td></tr>
+<tr><td><code>policy-title-meta-length</code></td><td>Length is truncation risk only — never pass/fail, never the lead finding.</td></tr>
+<tr><td><code>policy-ai-eligibility</code></td><td>Three conditions required, including Search Console inclusion, which the crawler <em>cannot</em> check and must say so.</td></tr>
+<tr><td><code>policy-geo-effect-sizes</code></td><td>Never quote a GEO percentage. Describe direction only.</td></tr>
+<tr><td><code>policy-geo-content-tactics</code></td><td>Recommend sources, quotes and data. Refuse authoritative-tone rewriting.</td></tr>
+<tr><td><code>policy-4xx-removal</code></td><td>Use the semantically correct status code. No removal-speed claim for 410.</td></tr>
+</tbody>
+</table>
+
+<h3>A policy in full</h3>
+
+<pre><code>{
+  "id": "policy-word-count",
+  "decision": "The 300-word threshold is an internal trigger. Never surface the number.",
+
+  "rationale": "Three separate Google documents deny a preferred word count — 'No, we don't',
+                'no magical word count target', 'no ideal page length'. A threshold is still
+                needed to make thinness computable, but it detects a candidate problem rather
+                than defining a standard the page must meet.",
+
+  "directive": "When the threshold fires, read the page and report what is actually missing...
+                If the page is functional — a login, a converter, a category page — suppress
+                the finding entirely.",
+
+  "neverSay": [
+    "This page is under 300 words.",
+    "Expand this page past 300 words.",
+    "Google prefers longer content."
+  ],
+
+  "losingClaim": "Pages need a minimum word count to perform in search.",
+  "appliesToChecks": ["words"]
+}</code></pre>
+
+<p><code>losingClaim</code> is kept deliberately: when a user or a competitor’s report raises the
+rejected position, the model can recognise and contradict it rather than agreeing.</p>
+
+<div class="callout warn">
+<p><strong>Four of these override the product’s own wording.</strong> The
+<code>h1</code> check hint says “Has one H1”; the <code>title</code> recommendation says “roughly
+50-60 characters”; the <code>words</code> recommendation says “Expand the page past 300 words”.
+These are not code bugs — a threshold is what makes a check computable — but the AI layer must
+not restate them as Google rules. That is what the policies enforce.</p>
+</div>
+
+<h2 id="phase1">6. Phase 1: the AI foundation</h2>
+
+<p>Phase 0 was already complete and verified before any of this started: the crawler retains real
+page text, heading text, links with anchors, parsed JSON-LD and image metadata; business context
+and Quick/Deep modes exist; all 224 existing tests pass.</p>
+
+<p>Phase 1 built the reusable machinery. Every item in the plan’s “done when” list:</p>
+
+<table>
+<thead><tr><th>Requirement</th><th>Where it lives</th></tr></thead>
+<tbody>
+<tr><td>Groq callable through a provider abstraction</td><td><code>packages/ai/src/provider/</code></td></tr>
+<tr><td>Future providers swappable</td><td><code>provider/index.ts</code> registry + <code>AI_BASE_URL</code></td></tr>
+<tr><td>Responses validated</td><td><code>packages/ai/src/schemas/</code> (zod, 8 contracts)</td></tr>
+<tr><td>Errors handled</td><td><code>AiError</code> taxonomy + bounded retry with backoff</td></tr>
+<tr><td>Knowledge stored &amp; retrieved</td><td><code>KnowledgeItem</code> table + <code>knowledge/index.ts</code></td></tr>
+<tr><td>Context builders exist</td><td><code>context/index.ts</code> — page, site, knowledge</td></tr>
+<tr><td>AI has independent queues</td><td><code>ai-page</code>, <code>ai-site</code>, <code>ai-competitor</code></td></tr>
+<tr><td>Results cached</td><td><code>cache/index.ts</code> — SHA-256 over everything that shapes the answer</td></tr>
+<tr><td>Prompt/knowledge versions traceable</td><td><code>AiResult.promptVersion</code>, <code>.knowledgeVersion</code></td></tr>
+</tbody>
+</table>
+
+<h3>Design decisions worth knowing</h3>
+
+<ul>
+<li><strong>No SDK.</strong> The provider talks to Groq’s OpenAI-compatible endpoint over
+<code>fetch</code>. The surface used is three fields of one JSON body; a dependency-free provider
+is one less thing on a release treadmill. The same class serves any OpenAI-compatible endpoint.</li>
+
+<li><strong>Validation is ours, not theirs.</strong> The request asks for
+<code>json_object</code> rather than a provider-side JSON schema, because schema support varies by
+model — and we validate with zod afterwards regardless. The contract is enforced on our side.</li>
+
+<li><strong>A failure is a row, not a gap.</strong> Provider outages and invalid output both write
+an <code>AiResult</code> with <code>status: failed</code> or <code>invalid</code>. Without that,
+“why is there no suggestion on this page” has no answer anyone can look up.</li>
+
+<li><strong>Retries are bounded inside the AI layer</strong>, so BullMQ does not retry on top of
+them. A 401 fails on the first attempt rather than making three identical doomed requests.</li>
+
+<li><strong>Missing API key disables AI; it does not crash the worker.</strong> The crawler and
+deterministic scoring must keep working with no provider configured.</li>
+</ul>
+
+<h2 id="files">7. Every file and what it does</h2>
+
+<h3>The knowledge folder</h3>
+<table>
+<thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>knowledge/knowledge-corpus.json</code></td><td><strong>The only file loaded at runtime.</strong> Items, policies, vocabularies, retrieval rules and the source register, all in one. 628 KB.</td></tr>
+<tr><td><code>knowledge/knowledge-item.schema.json</code></td><td>JSON Schema (draft 2020-12). All 173 items validate. Wire into CI.</td></tr>
+<tr><td><code>knowledge/build/*.py</code></td><td>Regenerates the corpus. One module per source document, plus <code>policies.py</code> for the decisions.</td></tr>
+<tr><td><code>knowledge/raw/{seo,geo}/</code></td><td>The 8 source PDFs. <span class="pill">local only — gitignored</span></td></tr>
+<tr><td><code>knowledge/archive/</code></td><td>The original 65-item seed, for rollback. <span class="pill">local only</span></td></tr>
+</tbody>
+</table>
+
+<h3>The AI package — <code>packages/ai/</code></h3>
+<table>
+<thead><tr><th>File</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>src/index.ts</code></td><td><code>runAiFeature()</code> — the single entry point. Owns cache lookup → knowledge retrieval → generation → validation → persistence.</td></tr>
+<tr><td><code>src/config.ts</code></td><td>Env loading and <code>resolveModel({plan, feature, mode})</code>. The only place a model is named.</td></tr>
+<tr><td><code>src/provider/types.ts</code></td><td>The <code>AiProvider</code> interface and the <code>AiError</code> taxonomy with per-kind <code>retryable</code>.</td></tr>
+<tr><td><code>src/provider/groq.ts</code></td><td>The OpenAI-compatible provider, plus <code>parseAndValidate()</code> which recovers JSON from fenced or prose-wrapped output.</td></tr>
+<tr><td><code>src/provider/index.ts</code></td><td>Registry and the retry loop with exponential backoff and jitter.</td></tr>
+<tr><td><code>src/schemas/index.ts</code></td><td>Eight output contracts. Every one requires <code>groundedIn</code>, <code>confidence</code> and <code>needsHumanReview</code>.</td></tr>
+<tr><td><code>src/knowledge/index.ts</code></td><td>Retrieval. Filters out superseded items and separates myths into <code>contradictions</code>.</td></tr>
+<tr><td><code>src/context/index.ts</code></td><td><code>buildPageContext</code>, <code>buildSiteContext</code>, <code>buildKnowledgeContext</code> — and <code>evidenceGaps</code>.</td></tr>
+<tr><td><code>src/cache/index.ts</code></td><td>Stable canonical hashing, so key order cannot cause a spurious cache miss.</td></tr>
+</tbody>
+</table>
+
+<h3>Everything else</h3>
+<table>
+<thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>packages/db/prisma/schema.prisma</code></td><td>Adds <code>KnowledgeItem</code> and <code>KnowledgePolicy</code>.</td></tr>
+<tr><td><code>packages/db/src/ingest-knowledge.ts</code></td><td>Loads the corpus into Postgres. Full replace in one transaction, so a deleted item disappears rather than lingering.</td></tr>
+<tr><td><code>packages/core/src/queue/names.ts</code></td><td>Three AI queue names and their job payload types.</td></tr>
+<tr><td><code>apps/worker/src/jobs/ai/analyze-page.ts</code></td><td>The first real feature: page recommendations grounded in failing checks.</td></tr>
+<tr><td><code>apps/worker/src/index.ts</code></td><td>Wires the <code>ai-page</code> worker at concurrency 2.</td></tr>
+</tbody>
+</table>
+
+<h2 id="example">8. Worked example, end to end</h2>
+
+<p>A dental clinic runs a <strong>Deep</strong> analysis on <code>brightsmile.example/services/whitening</code>.
+Here is what actually happens.</p>
+
+<h4>Step 1 — the crawler produces facts</h4>
+<pre><code>url:        https://brightsmile.example/services/whitening
+statusCode: 200
+title:      "Whitening"
+metaDesc:   null
+h1:         "Teeth Whitening"
+h1Count:    1
+wordCount:  184
+schemaCount: 0
+pageType:   "service"  (confidence 0.85)</code></pre>
+
+<p>The deterministic layer writes three <code>PageIssue</code> rows:
+<code>meta</code> (fail), <code>words</code> (warning, under the 300 threshold),
+<code>schema</code> (warning).</p>
+
+<h4>Step 2 — the job enqueues</h4>
+<p>Crawl completes → <code>ai-page</code> queue receives
+<code>{ pageId, mode: "deep" }</code>. It does <em>not</em> share the crawl queue, so a slow
+provider can never stall a crawl.</p>
+
+<h4>Step 3 — context is assembled</h4>
+<p><code>buildPageContext()</code> gathers the evidence <em>and</em> names what is missing:</p>
+<pre><code>evidenceGaps: [
+  "No structured data was found on the page."
+]</code></pre>
+<p>That list goes into the prompt verbatim. It is what turns “the model invented an answer” into
+“the model reported it lacked the evidence”.</p>
+
+<h4>Step 4 — knowledge is retrieved</h4>
+<p>The failing checks are <code>["meta", "words", "schema"]</code>. Retrieval joins on
+<code>checks</code> and returns, among others:</p>
+<ul>
+<li><code>seo-onpage-meta-description-criteria</code> — short, unique to one page, carries the key points</li>
+<li><code>seo-qrg-mc-quality-dimensions</code> — effort, originality, skill, accuracy</li>
+<li><code>seo-qrg-page-type-not-quality</code> — page type does not determine quality</li>
+<li><code>seo-sd-eligibility-not-guarantee</code> — markup creates <em>eligibility</em>, not a rich result</li>
+</ul>
+<p>Two policies attach automatically via <code>appliesToChecks</code>:
+<strong><code>policy-word-count</code></strong> and <strong><code>policy-title-meta-length</code></strong>.
+Myth items are returned separately, in <code>contradictions</code> — never mixed into advice.</p>
+
+<h4>Step 5 — the cache is checked</h4>
+<pre><code>sha256( feature + mode + model + promptVersion + knowledgeVersion
+        + evidence + businessContext )</code></pre>
+<p>Change the page, the business context, the corpus, or the prompt, and the key changes. A stale
+answer cannot survive a re-crawl or a knowledge re-ingest.</p>
+
+<h4>Step 6 — generation, and the difference the policies make</h4>
+
+<div class="card">
+<p><span class="bad-t">Without the knowledge layer</span> — what a bare LLM returns:</p>
+<blockquote style="margin:8px 0;color:var(--muted)">
+“This page is under 300 words. Google prefers longer content — expand it to at least 800 words.
+Your title is too short; aim for 50-60 characters. Add schema markup to get rich results.”
+</blockquote>
+<p style="margin-bottom:0"><strong>Four claims, three of them false.</strong> Google publishes no
+word-count preference, no title length, and markup never guarantees a rich result.</p>
+</div>
+
+<div class="card">
+<p><span class="good-t">With the knowledge layer</span> — what the validated output contains:</p>
+<blockquote style="margin:8px 0">
+<p><strong>Meta description</strong> (high severity, actionable) — The page has no meta
+description. Google generates snippets mainly from page content but may use a description when it
+describes the page better for a query. Write one that is unique to this page and names the
+treatment, the clinic and the location.</p>
+<p><strong>Content depth</strong> (medium, actionable) — The page introduces whitening but does
+not cover what a first-time patient needs before booking: what the appointment involves, how long
+results last, aftercare, and what it costs. Adding those is the gap — <em>not</em> a word count.</p>
+<p><strong>Structured data</strong> (medium, actionable) — No markup found. A <code>Service</code>
+or <code>Dentist</code> type matching the visible content would make the page <em>eligible</em>
+for richer presentation. Eligibility is not a guarantee; display remains Google’s decision.</p>
+</blockquote>
+<p style="margin-bottom:0"><code>groundedIn: ["evidence.metaDescription", "evidence.wordCount",
+"seo-onpage-meta-description-criteria", "seo-qrg-mc-quality-dimensions",
+"seo-sd-eligibility-not-guarantee"]</code></p>
+</div>
+
+<p>Note what the policies changed. “Under 300 words” became <em>what the page is actually
+missing</em>. “Add schema to get rich results” became “eligible for”. No character target appears
+anywhere, because none is documented.</p>
+
+<h4>Step 7 — validation, then storage</h4>
+<p>The response is parsed against <code>pageRecommendationSchema</code>. An empty
+<code>groundedIn</code> is a validation failure — a recommendation that cites nothing never
+reaches the database. On success an <code>AiResult</code> row records the provider, model,
+prompt version, knowledge version, input hash and token counts.</p>
+
+<div class="flow">
+crawl → deterministic checks → PageIssue rows<br>
+&nbsp;&nbsp;&nbsp;&nbsp;↓<br>
+ai-page queue → buildPageContext() + evidenceGaps<br>
+&nbsp;&nbsp;&nbsp;&nbsp;↓<br>
+retrieveKnowledge(checks) → items + <span class="bad-t">contradictions</span> + <span class="good-t">policies</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;↓<br>
+cache lookup (miss) → generateStructured() → retry/backoff<br>
+&nbsp;&nbsp;&nbsp;&nbsp;↓<br>
+zod validation → <span class="bad-t">reject</span> or <span class="good-t">AiResult row</span>
+</div>
+
+<h2 id="run">9. How to run it</h2>
+
+<pre><code># 1. start infrastructure
+pnpm db:up
+
+# 2. apply the Phase 1 migration (creates the two knowledge tables)
+pnpm db:deploy
+
+# 3. load the corpus into Postgres — 170 items, 7 policies
+pnpm knowledge:ingest
+
+# 4. add a Groq key to .env
+AI_PROVIDER=groq
+AI_MODEL=llama-3.3-70b-versatile
+AI_API_KEY=gsk_...
+
+# 5. run
+pnpm dev</code></pre>
+
+<div class="callout">
+<p>Steps 2 and 3 were not run on this machine — Docker Desktop was not running. The migration SQL
+was written by hand and <strong>verified column-for-column against Prisma’s own generated DDL</strong>
+(43 columns and 3 indexes on <code>KnowledgeItem</code>, 14 on <code>KnowledgePolicy</code>, exact
+match). It will apply cleanly.</p>
+<p>Leaving <code>AI_API_KEY</code> empty is supported: AI features report unavailable, and the
+crawler and scoring work exactly as before.</p>
+</div>
+
+<h3>Verification</h3>
+<pre><code>pnpm test    # 259 passing — 224 core, 35 new in packages/ai
+pnpm build   # clean across all workspaces</code></pre>
+
+<h2 id="next">10. What Phase 2 adds</h2>
+
+<p>The foundation is deliberately broader than what is wired. All eight output contracts, the
+three queues and the full context layer exist; Phase 1 ships <strong>one</strong> real feature —
+page recommendations — so the pipeline is proven rather than theoretical.</p>
+
+<p>Phase 2 adds the remaining page features (title, meta, content, schema, internal links) on top
+of the same <code>runAiFeature()</code> call. Each is a schema and a prompt; none requires changes
+to the provider, retrieval, caching or queue layers.</p>
+
+<p>One field is reserved for it: <code>KnowledgeItem.pageTypes</code> is empty today and gets
+populated in Phase 2, when page-type-specific knowledge is added.</p>
+
+<h3>Known gaps — unresolved, not missing</h3>
+<p>Ranking weights, per-engine AI citation formulas, ChatGPT’s retrieval backend, whether any
+production system reads <code>llms.txt</code>, local SEO ranking specifics, and the durability of
+the GEO effect sizes.</p>
+<p>45 items cite sources not archived in <code>raw/</code> and were not re-read. Adding those PDFs
+is the highest-value next step; the source register ranks them by how many items depend on each.</p>
+
+<p class="meta">Generated 23 September 2026 · branch <code>feat/ai-analysis</code> ·
+corpus v2.1+2026-09-22</p>
+
+</div>
+</body>
+</html>
