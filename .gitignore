@@ -8,7 +8,15 @@ dist
 .env*.local
 apps/worker/storage
 graphify-out
+# The knowledge folder: ship what the code needs, keep the bulk out.
+# knowledge-corpus.json is a runtime dependency of packages/db/src/ingest-knowledge.ts,
+# so a fresh clone must have it. The source PDFs (~12 MB) and the v1 archive are local.
 knowledge/*
+!knowledge/knowledge-corpus.json
+!knowledge/knowledge-item.schema.json
+!knowledge/README.md
+!knowledge/build/
+knowledge/build/__pycache__/
 
 SEO_Maker_AI_4_Phase_Implementation_Plan.md
 SEO_Maker_AI_Architecture_and_Implementation.md
