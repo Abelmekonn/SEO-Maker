@@ -1,0 +1,421 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seo-maker.local/schema/knowledge-item.schema.json",
+  "title": "SEO Maker knowledge item",
+  "description": "One atomic, reusable SEO or GEO claim with its evidence class, scope, provenance and the deterministic checks it can explain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "domain",
+    "category",
+    "topic",
+    "knowledgeType",
+    "claimType",
+    "title",
+    "principle",
+    "explanation",
+    "whyItMatters",
+    "appliesWhen",
+    "doesNotApplyWhen",
+    "entities",
+    "checks",
+    "recommendedAction",
+    "applicability",
+    "evidenceType",
+    "evidenceStrength",
+    "confidence",
+    "source",
+    "limitations",
+    "tags",
+    "provenance",
+    "version",
+    "lastVerified",
+    "reviewBy",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Stable slug. Prefix encodes domain and area, e.g. seo-tech-*, geo-*, myth-*."
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "seo",
+        "geo"
+      ],
+      "description": "Top-level split between classic search and generative/AI search."
+    },
+    "category": {
+      "type": "string",
+      "description": "Coarse subject area used for grouping and filtering."
+    },
+    "topic": {
+      "type": "string",
+      "description": "Primary retrieval key. Should match the deterministic check or finding that fires."
+    },
+    "subtopic": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optional finer retrieval key."
+    },
+    "knowledgeType": {
+      "type": "string",
+      "enum": [
+        "authoritative",
+        "heuristic",
+        "research",
+        "myth"
+      ],
+      "description": "authoritative requires an official or standards source. 'myth' items must never be emitted as recommendations."
+    },
+    "claimType": {
+      "type": "string",
+      "enum": [
+        "official_requirement",
+        "official_recommendation",
+        "documented_behavior",
+        "specification_rule",
+        "evaluation_criterion",
+        "experimental_result",
+        "correlation",
+        "case_study",
+        "expert_opinion",
+        "common_practice",
+        "myth"
+      ],
+      "description": "How strong the claim itself is, independent of source quality. 'evaluation_criterion' must never be described as ranking-system behaviour."
+    },
+    "title": {
+      "type": "string",
+      "description": "Short human label, one line."
+    },
+    "principle": {
+      "type": "string",
+      "description": "The claim itself. Primary embeddable text."
+    },
+    "explanation": {
+      "type": "string",
+      "description": "How SEO Maker should apply the claim."
+    },
+    "whyItMatters": {
+      "type": "string",
+      "description": "Why this matters for a real audit."
+    },
+    "appliesWhen": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "description": "Concrete conditions under which the item should be retrieved."
+    },
+    "doesNotApplyWhen": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "description": "Concrete conditions under which the item must NOT be applied."
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "page",
+          "site",
+          "content",
+          "link",
+          "image",
+          "video",
+          "structured_data",
+          "technical_configuration",
+          "business",
+          "query",
+          "crawler"
+        ],
+        "description": ""
+      },
+      "description": "Which SEO entities the claim concerns."
+    },
+    "relatedIssues": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 0,
+      "description": "Human-readable issue names this item can explain."
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "status",
+          "title",
+          "meta",
+          "h1",
+          "h2",
+          "canonical",
+          "images",
+          "links",
+          "words",
+          "schema",
+          "indexability",
+          "robots",
+          "sitemap",
+          "robots_audit",
+          "sitemap_audit",
+          "crawl_plan",
+          "none"
+        ],
+        "description": ""
+      },
+      "description": "Deterministic checks in packages/core this item can explain. 'none' means no check maps to it."
+    },
+    "recommendedAction": {
+      "type": "string",
+      "description": "What SEO Maker should actually recommend or do."
+    },
+    "applicability": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "page_audit",
+          "site_audit",
+          "technical_audit",
+          "canonical_analysis",
+          "title_generation",
+          "meta_generation",
+          "heading_analysis",
+          "content_analysis",
+          "image_analysis",
+          "internal_link_analysis",
+          "performance_analysis",
+          "structured_data_analysis",
+          "international_analysis",
+          "geo_analysis",
+          "myth_guard",
+          "crawl_analysis",
+          "indexability_analysis",
+          "url_analysis",
+          "intent_analysis",
+          "freshness_analysis",
+          "local_analysis",
+          "ecommerce_analysis",
+          "spam_risk_analysis",
+          "prioritisation",
+          "reporting_language"
+        ],
+        "description": ""
+      },
+      "description": "Retrieval routing tags for the feature in play."
+    },
+    "evidenceType": {
+      "type": "string",
+      "enum": [
+        "official_documentation",
+        "standard",
+        "research",
+        "experiment",
+        "case_study",
+        "expert_recommendation",
+        "industry_observation"
+      ],
+      "description": "The kind of evidence behind the claim."
+    },
+    "evidenceStrength": {
+      "type": "string",
+      "enum": [
+        "strong",
+        "moderate",
+        "weak",
+        "unknown"
+      ],
+      "description": "How strong that evidence is. Never phrase a recommendation above this level."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "description": "Overall confidence in the item as written."
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "publisher",
+        "type"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "official",
+            "standard",
+            "research",
+            "expert"
+          ],
+          "description": ""
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Section, page, table or heading within the source."
+        },
+        "quote": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Short verbatim quote. Null when not verified against the source."
+        },
+        "localPath": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Path to the archived source under knowledge/raw/."
+        },
+        "publishedDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastUpdated": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "accessedDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "limitations": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Mandatory. An item with no stated limit is usually an overclaim."
+    },
+    "relatedKnowledge": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 0,
+      "description": "Ids of related items. Reverse links are backfilled at build time."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "description": "Free-text retrieval tags."
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceSupport",
+        "extractionPass",
+        "verifiedAgainstLocalSource"
+      ],
+      "properties": {
+        "sourceSupport": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "derived",
+            "insufficient"
+          ],
+          "description": "direct = stated by the source; derived = follows from it; insufficient = do not rely on it."
+        },
+        "modelInterpretation": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Anything added by the extractor beyond the source, labelled as such."
+        },
+        "extractionPass": {
+          "type": "string",
+          "description": "Which pass produced the item."
+        },
+        "verifiedAgainstLocalSource": {
+          "type": "boolean",
+          "description": "True only if the source document under knowledge/raw/ was read in that pass."
+        },
+        "migrationNote": {
+          "type": "string"
+        }
+      }
+    },
+    "version": {
+      "type": "string",
+      "description": "Source version or date the claim was taken from."
+    },
+    "lastVerified": {
+      "type": "string",
+      "format": "date"
+    },
+    "reviewBy": {
+      "type": "string",
+      "format": "date",
+      "description": "Re-verify by this date. GEO quarterly, official docs ~6 months, standards yearly."
+    },
+    "potentiallyOutdated": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "revised",
+        "superseded",
+        "needs_verification"
+      ],
+      "description": "Retrieval must exclude 'superseded' and 'needs_verification'."
+    },
+    "supersededBy": {
+      "type": "string",
+      "description": "Id of the item that replaces this one."
+    },
+    "governingPolicies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ids in corpus.policies that override this item phrasing. Apply before emitting recommendedAction."
+    }
+  }
+}
