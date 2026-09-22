@@ -1,0 +1,27 @@
+{
+  "name": "@seo-maker/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./provider": "./src/provider/index.ts",
+    "./schemas": "./src/schemas/index.ts",
+    "./knowledge": "./src/knowledge/index.ts",
+    "./context": "./src/context/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@seo-maker/core": "workspace:*",
+    "@seo-maker/db": "workspace:*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

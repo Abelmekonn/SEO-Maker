@@ -23,6 +23,9 @@ importers:
       '@prisma/client':
         specifier: ^6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      '@seo-maker/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@seo-maker/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -96,6 +99,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@seo-maker/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@seo-maker/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -122,6 +128,28 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/ai:
+    dependencies:
+      '@seo-maker/core':
+        specifier: workspace:*
+        version: link:../core
+      '@seo-maker/db':
+        specifier: workspace:*
+        version: link:../db
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.4
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.4)(jiti@2.7.0)(jsdom@26.1.0(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.13)(yaml@2.9.1)
+
   packages/core:
     devDependencies:
       '@types/node':
@@ -140,9 +168,15 @@ importers:
         specifier: ^6.16.2
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.4
       prisma:
         specifier: ^6.16.2
         version: 6.19.3(typescript@5.9.3)
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.13
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -7491,7 +7525,7 @@ snapshots:
 
   '@types/jsdom@21.1.7':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.4
       '@types/tough-cookie': 4.0.5
       parse5: 7.3.0
 
@@ -7517,7 +7551,7 @@ snapshots:
 
   '@types/sax@1.2.7':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.4
 
   '@types/tough-cookie@4.0.5': {}
 

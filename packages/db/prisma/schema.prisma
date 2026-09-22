@@ -529,3 +529,107 @@ model Opportunity {
 
   @@index([projectId, status, score])
 }
+
+/// One atomic SEO/GEO knowledge item (Phase 1.5).
+///
+/// Mirrors knowledge/knowledge-corpus.json, which is the authored source of
+/// truth. Rows are replaced wholesale by `pnpm knowledge:ingest`; nothing else
+/// writes here, so the corpus file and the table can never drift.
+///
+/// knowledgeType: authoritative | heuristic | research | myth
+/// status:        active | revised | superseded | needs_verification
+model KnowledgeItem {
+  /// The corpus slug, e.g. "seo-tech-robots-5xx-disallow".
+  id String @id
+
+  domain        String
+  category      String
+  topic         String
+  subtopic      String?
+  knowledgeType String
+  claimType     String
+
+  title             String
+  principle         String
+  explanation       String
+  whyItMatters      String
+  recommendedAction String
+  /// Never null. An item with no stated limit is usually an overclaim.
+  limitations       String
+
+  appliesWhen      Json
+  doesNotApplyWhen Json
+  relatedIssues    Json
+  relatedKnowledge Json
+
+  /// Deterministic CheckIds this item can explain. The primary retrieval key,
+  /// alongside `topic` — Phase 1.7 routes on metadata before embeddings.
+  checks        String[]
+  applicability String[]
+  entities      String[]
+  tags          String[]
+  /// Populated in Phase 2, when page-type-specific knowledge is added.
+  pageTypes     String[]
+
+  evidenceType     String
+  evidenceStrength String
+  confidence       String
+
+  sourceName      String
+  sourcePublisher String
+  sourceUrl       String?
+  sourceType      String
+  sourceLocation  String?
+  sourceQuote     String?
+  sourceLocalPath String?
+
+  /// False when the source document was not read in the pass that produced the
+  /// item. Such items carry no quote and no location, and retrieval prefers a
+  /// verified item when both cover the same ground.
+  verified     Boolean
+  sourceSupport String
+
+  status       String
+  supersededBy String?
+  /// Ids in KnowledgePolicy that override this item's phrasing.
+  governingPolicies String[]
+
+  version       String
+  lastVerified  String?
+  reviewBy      String?
+  /// Corpus build stamp, copied to AiResult.knowledgeVersion for traceability.
+  corpusVersion String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, knowledgeType])
+  @@index([topic])
+  @@index([domain, category])
+}
+
+/// A resolved conflict (Phase 1.5). Overrides an item's own phrasing.
+///
+/// Every disagreement found during extraction is decided rather than left open,
+/// so the model never has to arbitrate between two sources at generation time.
+model KnowledgePolicy {
+  id        String @id
+  question  String
+  decision  String
+  rationale String
+  directive String
+  /// Phrasings the model must never emit.
+  neverSay Json
+  /// The rejected position, kept so the model can recognise and contradict it.
+  losingClaim String
+  caveat      String?
+
+  appliesToItems  String[]
+  appliesToChecks String[]
+
+  confidence    String
+  corpusVersion String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

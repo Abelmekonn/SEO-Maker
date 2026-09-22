@@ -8,6 +8,7 @@
     "start": "tsx --env-file=.env src/index.ts"
   },
   "dependencies": {
+    "@seo-maker/ai": "workspace:*",
     "@seo-maker/core": "workspace:*",
     "@seo-maker/db": "workspace:*",
     "bullmq": "^5.61.0",

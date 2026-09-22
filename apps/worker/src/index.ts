@@ -1,13 +1,17 @@
 import {
+  AI_PAGE_ANALYZE_JOB,
+  AI_PAGE_QUEUE,
   COMPETITOR_ANALYZE_ONE_JOB,
   COMPETITOR_QUEUE,
   CRAWL_HOMEPAGE_JOB,
   CRAWL_QUEUE,
   RUN_PERFORMANCE_JOB,
+  type AiPageAnalyzeJob,
   type CompetitorAnalyzeOneJob,
 } from "@seo-maker/core/queue";
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
+import { aiAnalyzePageJob } from "./jobs/ai/analyze-page.js";
 import { competitorAnalyzeOneJob } from "./jobs/competitors/analyze-one.js";
 import { crawlHomepageJob, type CrawlHomepageJob } from "./jobs/crawl-site";
 import { runPerformanceJob, type RunPerformanceJob } from "./jobs/run-performance";
@@ -68,4 +72,34 @@ competitorWorker.on("failed", (job, error) => {
   console.error(`Competitor ${job?.id} failed:`, error);
 });
 
-console.log(`Worker listening on ${CRAWL_QUEUE} and ${COMPETITOR_QUEUE} (${redisUrl})`);
+/**
+ * AI runs on its own queue (Phase 1.9) at concurrency 2.
+ *
+ * Separate from the crawler so a slow provider can never stall a crawl, and
+ * concurrency above 1 because these jobs are almost entirely network wait.
+ * Retries are bounded inside the AI layer, so BullMQ does not retry on top:
+ * a failed generation is already a recorded AiResult row.
+ */
+const aiPageWorker = new Worker<AiPageAnalyzeJob>(
+  AI_PAGE_QUEUE,
+  async (job) => {
+    if (job.name === AI_PAGE_ANALYZE_JOB) {
+      const payload = job.data;
+      console.log(`AI page ${job.id}: ${payload.pageId} (${payload.mode})`);
+      await aiAnalyzePageJob(payload);
+      console.log(`AI page ${job.id}: done`);
+      return;
+    }
+
+    throw new Error(`Unknown job name: ${job.name}`);
+  },
+  { connection, concurrency: 2, lockDuration: 5 * 60 * 1000 },
+);
+
+aiPageWorker.on("failed", (job, error) => {
+  console.error(`AI page ${job?.id} failed:`, error);
+});
+
+console.log(
+  `Worker listening on ${CRAWL_QUEUE}, ${COMPETITOR_QUEUE} and ${AI_PAGE_QUEUE} (${redisUrl})`,
+);

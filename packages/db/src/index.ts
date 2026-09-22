@@ -17,6 +17,8 @@ export type {
   CompetitorQuery,
   ContentGap,
   Crawl,
+  KnowledgeItem,
+  KnowledgePolicy,
   Opportunity,
   Page,
   PageIssue,

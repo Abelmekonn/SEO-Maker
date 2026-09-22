@@ -11,13 +11,16 @@
     "migrate": "node generate.mjs migrate dev",
     "migrate:deploy": "node generate.mjs migrate deploy",
     "studio": "node generate.mjs studio",
-    "postinstall": "node generate.mjs generate"
+    "postinstall": "node generate.mjs generate",
+    "knowledge:ingest": "tsx src/ingest-knowledge.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
     "prisma": "^6.16.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.8.3"
   }
 }
