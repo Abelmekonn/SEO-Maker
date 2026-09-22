@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
+import { loadDatabaseUrl } from "./prisma-env.mjs";
 
-process.env.DATABASE_URL ??=
-  "postgresql://postgres:postgres@localhost:5432/seo_maker";
+loadDatabaseUrl();
 
-const result = spawnSync("prisma", ["generate"], {
+const args = process.argv.slice(2);
+const result = spawnSync("prisma", args.length > 0 ? args : ["generate"], {
   stdio: "inherit",
   env: process.env,
   shell: true,

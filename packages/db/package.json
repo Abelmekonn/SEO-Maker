@@ -7,10 +7,11 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "generate": "node generate.mjs",
-    "migrate": "prisma migrate dev",
-    "migrate:deploy": "prisma migrate deploy",
-    "postinstall": "node generate.mjs"
+    "generate": "node generate.mjs generate",
+    "migrate": "node generate.mjs migrate dev",
+    "migrate:deploy": "node generate.mjs migrate deploy",
+    "studio": "node generate.mjs studio",
+    "postinstall": "node generate.mjs generate"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2"
