@@ -4,3 +4,4 @@ export * from "./bands";
 export * from "./confidence";
 export * from "./seo-score";
 export * from "./opportunity";
+export * from "./indexability";
