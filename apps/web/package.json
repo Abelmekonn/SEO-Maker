@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^9.1.0",
     "@clerk/nextjs": "^6.33.3",
     "@prisma/client": "^6.19.3",
     "@seo-maker/core": "workspace:*",
@@ -22,7 +23,8 @@
     "radix-ui": "^1.6.7",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "simple-icons": "^16.30.0"
+    "simple-icons": "^16.30.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
