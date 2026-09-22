@@ -1,8 +1,9 @@
+import { compareCrawls } from "@seo-maker/core/crawl";
 import { prisma } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
 import { ProjectOverview } from "@/components/project/ProjectOverview";
 import { getAccountForUser } from "@/lib/plan";
-import { getProjectForUser, requireUserId } from "@/lib/projects";
+import { getCrawlHistory, getProjectForUser, requireUserId } from "@/lib/projects";
 import { findHomepage } from "@/lib/site-url";
 
 export default async function ProjectOverviewPage({
@@ -32,6 +33,10 @@ export default async function ProjectOverviewPage({
       })
     : [];
 
+  const history = await getCrawlHistory(project.id);
+  const crawl = history.find((entry) => entry.id === project.latestCrawlId) ?? history[0] ?? null;
+  const comparison = compareCrawls(history);
+
   const mobile = audits.find((audit) => audit.strategy === "mobile") ?? null;
   const desktop = audits.find((audit) => audit.strategy === "desktop") ?? null;
 
@@ -43,6 +48,8 @@ export default async function ProjectOverviewPage({
       maxPages={maxPages}
       mobile={mobile}
       desktop={desktop}
+      crawl={crawl}
+      comparison={comparison}
     />
   );
 }

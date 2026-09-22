@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { CompetitorDetail } from "@/components/project/CompetitorDetail";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { getCompetitorForUser, serpConfigured } from "@/lib/competitors";
-import { requireUserId } from "@/lib/projects";
+import { latestPagesForProject, requireUserId } from "@/lib/projects";
 
 const TABS = ["overview", "rankings", "pages", "content", "gaps", "compare"] as const;
 type TabId = (typeof TABS)[number];
@@ -48,7 +48,7 @@ export default async function CompetitorDetailPage({
       orderBy: { wordCount: "desc" },
       take: 100,
     }),
-    prisma.page.findMany({ where: { projectId: id } }),
+    latestPagesForProject(id),
     prisma.serpResult.findMany({
       where: { domain: competitor.domain, query: { projectId: id } },
       include: { query: true },
