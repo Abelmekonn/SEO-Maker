@@ -51,7 +51,9 @@ describe("failsCheck thresholds", () => {
     ["links", { internalLinks: 1 }, { internalLinks: 0 }],
     ["words", { wordCount: 300 }, { wordCount: 299 }],
     ["schema", { schemaCount: 1 }, { schemaCount: 0 }],
-    ["indexability", { indexable: true }, { indexable: false }],
+    // Sitemap membership decides this: the site advertising a noindexed URL
+    // is the contradiction. Noindex outside the sitemap is intentional.
+    ["indexability", { indexable: true }, { indexable: false, inSitemap: true }],
     ["robots", { robotsOk: true }, { robotsOk: false }],
     ["sitemap", { hasSitemap: true }, { hasSitemap: false }],
   ];
@@ -123,8 +125,12 @@ describe("pageHealth", () => {
     expect(pageHealth(page({ statusCode: 500 }))).toBe("critical");
   });
 
-  it("treats noindex as critical", () => {
-    expect(pageHealth(page({ indexable: false }))).toBe("critical");
+  it("treats a sitemap/noindex contradiction as critical", () => {
+    expect(pageHealth(page({ indexable: false, inSitemap: true }))).toBe("critical");
+  });
+
+  it("does not penalise a page deliberately kept out of the index", () => {
+    expect(pageHealth(page({ indexable: false, inSitemap: false }))).toBe("optimized");
   });
 
   it("treats thin content alone as a warning", () => {

@@ -1,3 +1,5 @@
+import { indexabilityVerdict } from "./indexability";
+
 const THIN_WORDS = 300;
 
 /**
@@ -12,6 +14,7 @@ export type AuditablePage = {
   title?: string | null;
   metaDesc?: string | null;
   h1?: string | null;
+  h1Count?: number | null;
   h2Count?: number | null;
   canonicalUrl?: string | null;
   wordCount?: number | null;
@@ -25,6 +28,11 @@ export type AuditablePage = {
   hasSitemap?: boolean | null;
   xRobotsTag?: string | null;
   indexable?: boolean | null;
+  /** Whether the site's own sitemap lists this URL. Null when no sitemap exists. */
+  inSitemap?: boolean | null;
+  /** Whether robots.txt disallows this path for our crawler. */
+  robotsDisallowed?: boolean | null;
+  pageType?: string | null;
 };
 
 export function hasText(value: string | null | undefined) {
@@ -38,6 +46,10 @@ export function isCrawled(page: AuditablePage) {
 export function isThin(page: AuditablePage) {
   return isCrawled(page) && page.wordCount != null && page.wordCount < THIN_WORDS;
 }
+
+export type CheckStatus = "pass" | "warning" | "fail";
+
+export type CheckSeverity = "low" | "medium" | "high" | "critical";
 
 export type CheckId =
   | "status"
@@ -96,12 +108,33 @@ export function failsCheck(page: AuditablePage, check: CheckId) {
     case "schema":
       return (page.schemaCount ?? 0) < 1;
     case "indexability":
-      return page.indexable === false;
+      // Evidence-aware: a deliberately excluded page is not a failure.
+      // See `indexabilityVerdict` for why sitemap membership decides this.
+      return indexabilityVerdict(page).status === "fail";
     case "robots":
       return page.robotsOk === false;
     case "sitemap":
       return page.hasSitemap === false;
   }
+}
+
+/**
+ * Three-state view of a check.
+ *
+ * `failsCheck` stays boolean so existing callers and the scoring maths are
+ * untouched; this adds the warning tier the UI and the issue log need.
+ */
+export function checkStatus(page: AuditablePage, check: CheckId): CheckStatus {
+  if (!isCrawled(page)) {
+    return "pass";
+  }
+  if (check === "indexability") {
+    return indexabilityVerdict(page).status;
+  }
+  if (failsCheck(page, check)) {
+    return warningIds.includes(check) ? "warning" : "fail";
+  }
+  return "pass";
 }
 
 export function failedChecks(page: AuditablePage) {
@@ -177,17 +210,22 @@ export function checkValue(
       };
     case "schema":
       return { value: count(page.schemaCount ?? 0, "JSON-LD block") };
-    case "indexability":
+    case "indexability": {
+      const verdict = indexabilityVerdict(page);
       if (page.indexable === false) {
         return {
-          value: "Blocked from indexing",
-          detail: page.xRobotsTag ? `X-Robots-Tag: ${page.xRobotsTag}` : "noindex in robots meta",
+          value: verdict.intentional ? "Excluded on purpose" : "Blocked from indexing",
+          detail: verdict.message,
         };
       }
       return {
-        value: "Indexable",
-        detail: page.xRobotsTag ? `X-Robots-Tag: ${page.xRobotsTag}` : undefined,
+        value: verdict.status === "pass" ? "Indexable" : "Indexable but unreachable",
+        detail:
+          verdict.reason === "indexable"
+            ? (page.xRobotsTag ? `X-Robots-Tag: ${page.xRobotsTag}` : undefined)
+            : verdict.message,
       };
+    }
     case "robots":
       return page.robotsOk
         ? { value: "robots.txt found", detail: page.robotsTxtUrl ?? undefined }
@@ -301,3 +339,98 @@ export function pageAuditStats(pages: AuditablePage[]) {
 }
 
 export const THIN_WORD_LIMIT = THIN_WORDS;
+
+/**
+ * Severity per check.
+ *
+ * Deterministic and code-owned: architecture §12 and rule 10 are explicit that
+ * the LLM must never decide numeric priority. AI explains a severity; it does
+ * not choose one.
+ */
+export const checkSeverity: Record<CheckId, CheckSeverity> = {
+  status: "critical",
+  indexability: "critical",
+  canonical: "high",
+  title: "high",
+  meta: "high",
+  h1: "high",
+  robots: "high",
+  sitemap: "medium",
+  schema: "medium",
+  links: "medium",
+  words: "medium",
+  h2: "low",
+  images: "low",
+};
+
+/**
+ * One persisted finding. Matches the contract PRD §45 specifies so the UI,
+ * scoring engine, AI layer and reports all read the same record instead of
+ * each re-deriving it.
+ */
+export type PageIssueRecord = {
+  checkId: CheckId;
+  status: CheckStatus;
+  severity: CheckSeverity;
+  message: string;
+  evidence: string | null;
+  recommendation: string | null;
+};
+
+const RECOMMENDATION: Record<CheckId, string> = {
+  status: "Return a 2xx response, or remove the URL from internal links and the sitemap.",
+  title: "Add a unique title of roughly 50-60 characters describing this page.",
+  meta: "Add a meta description of roughly 120-160 characters summarising the page.",
+  h1: "Add a single H1 that states what the page is about.",
+  h2: "Break the page into sections with H2 headings.",
+  canonical: "Declare a self-referencing canonical link unless this page is a deliberate duplicate.",
+  images: "Add descriptive alt text to every meaningful image, and empty alt to decorative ones.",
+  links: "Link to this page from related pages so it is reachable and passes context.",
+  words: `Expand the page past ${THIN_WORDS} words of genuine content, or merge it into a stronger page.`,
+  schema: "Add JSON-LD structured data matching what the page represents.",
+  indexability: "Make the sitemap and the page's robots directives agree on whether this URL should be indexed.",
+  robots: "Serve a reachable robots.txt at the site root.",
+  sitemap: "Publish a sitemap and declare it in robots.txt.",
+};
+
+/**
+ * Projects a crawled page into the issue records to persist.
+ *
+ * Deliberately derived from the same `checkStatus`/`checkValue` functions the
+ * UI uses (Phase 0.4: do not rewrite deterministic scoring) — persisting is
+ * the only change, so a stored issue can never disagree with a rendered one.
+ */
+export function toPageIssues(page: AuditablePage): PageIssueRecord[] {
+  if (!isCrawled(page)) {
+    return [];
+  }
+
+  const records: PageIssueRecord[] = [];
+  for (const check of checks) {
+    const status = checkStatus(page, check.id);
+    if (status === "pass") {
+      continue;
+    }
+    const observed = checkValue(page, check.id);
+    records.push({
+      checkId: check.id,
+      status,
+      severity: status === "warning" ? downgrade(checkSeverity[check.id]) : checkSeverity[check.id],
+      message: check.id === "indexability" ? indexabilityVerdict(page).message : check.hint,
+      evidence: observed.detail ? `${observed.value} — ${observed.detail}` : observed.value,
+      recommendation: RECOMMENDATION[check.id] ?? null,
+    });
+  }
+  return records;
+}
+
+function downgrade(severity: CheckSeverity): CheckSeverity {
+  switch (severity) {
+    case "critical":
+      return "high";
+    case "high":
+      return "medium";
+    default:
+      return "low";
+  }
+}

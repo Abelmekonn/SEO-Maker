@@ -7,10 +7,12 @@
     ".": "./src/index.ts",
     "./scoring": "./src/scoring/index.ts",
     "./net": "./src/net/index.ts",
-    "./ai": "./src/ai/index.ts",
-    "./serp": "./src/serp/index.ts",
     "./queue": "./src/queue/index.ts",
-    "./competitors": "./src/competitors/index.ts"
+    "./competitors": "./src/competitors/index.ts",
+    "./crawl": "./src/crawl/index.ts",
+    "./robots": "./src/robots/index.ts",
+    "./sitemap": "./src/sitemap/index.ts",
+    "./page": "./src/page/index.ts"
   },
   "scripts": {
     "test": "vitest run",
