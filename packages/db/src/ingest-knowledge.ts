@@ -14,7 +14,14 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { prisma } from "./index";
+// Resolve DATABASE_URL from the repo-root .env before the Prisma client is
+// constructed, the same way the Prisma CLI scripts do. Importing ./index first
+// would build a client against an unset variable.
+import { loadDatabaseUrl } from "../prisma-env.mjs";
+
+loadDatabaseUrl();
+
+const { prisma } = await import("./index");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CORPUS_PATH = resolve(here, "../../../knowledge/knowledge-corpus.json");
