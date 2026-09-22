@@ -11,6 +11,8 @@ export type PageSpeedResult = {
   cls: number | null;
   tbt: number | null;
   inp: number | null;
+  ttfb: number | null;
+  speedIndex: number | null;
   rawData: Record<string, unknown>;
   opportunities: Array<{
     id: string;
@@ -113,6 +115,8 @@ export async function runPageSpeed(url: string, strategy: Strategy): Promise<Pag
       payload.loadingExperience?.metrics?.INTERACTION_TO_NEXT_PAINT?.percentile ??
         audits["interaction-to-next-paint"]?.numericValue,
     ),
+    ttfb: toSeconds(audits["server-response-time"]?.numericValue),
+    speedIndex: toSeconds(audits["speed-index"]?.numericValue),
     rawData: {
       id: payload.id,
       analysisUTCTimestamp: payload.analysisUTCTimestamp,

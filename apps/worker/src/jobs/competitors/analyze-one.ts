@@ -5,8 +5,7 @@ import {
   weightedSeoScore,
 } from "@seo-maker/core/scoring";
 import { prisma } from "@seo-maker/db";
-import { crawlCompetitor } from "../../lib/competitor-crawler.js";
-import type { PageAudit } from "../../lib/crawler.js";
+import { type CompetitorPageAudit, crawlCompetitor } from "../../lib/competitor-crawler.js";
 
 const MAX_COMPETITOR_PAGES = 25;
 
@@ -49,7 +48,7 @@ export function toAuditablePage(page: {
   };
 }
 
-function auditToRow(audit: PageAudit) {
+function auditToRow(audit: CompetitorPageAudit) {
   return {
     url: audit.url,
     finalUrl: audit.finalUrl,
