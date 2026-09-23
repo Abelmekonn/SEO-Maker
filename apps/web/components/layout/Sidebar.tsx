@@ -107,12 +107,6 @@ export function Sidebar({ plan }: { plan: PlanId }) {
           icon: Quote,
         },
         {
-          key: "ai-competitors",
-          href: `${projectBase}/ai-search/competitors`,
-          label: "AI Competitors",
-          icon: Swords,
-        },
-        {
           key: "geo-opportunities",
           href: `${projectBase}/ai-search/opportunities`,
           label: "GEO Opportunities",

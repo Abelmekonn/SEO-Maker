@@ -195,7 +195,18 @@ export function AiVisibilityBoard({
               </div>
             </Panel>
 
-            <Panel title="AI competitors" className="lg:w-[340px] lg:shrink-0">
+            <Panel
+              title="AI competitors"
+              className="lg:w-[340px] lg:shrink-0"
+              action={
+                <Link
+                  href={`/projects/${projectId}/competitors`}
+                  className="rounded-md text-[12px] font-medium text-muted-foreground hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Manage
+                </Link>
+              }
+            >
               {competitors.length === 0 ? (
                 <p className="rounded-lg bg-canvas px-4 py-3 text-[12px] leading-5 text-muted-soft ring-1 ring-hairline">
                   No competitors tracked yet.
