@@ -15,12 +15,14 @@ import {
   LayoutDashboard,
   Lightbulb,
   Lock,
+  Menu,
   Plus,
   Settings,
   Sparkles,
   Star,
   Swords,
   Wrench,
+  X,
 } from "lucide-react";
 import { clerkDarkAppearance } from "@/lib/clerk-appearance";
 import type { PlanId } from "@/lib/plan";
@@ -69,9 +71,71 @@ export function Sidebar({ plan }: { plan: PlanId }) {
     return exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
   }
 
+  // Below lg the sidebar collapses into a drawer behind a top bar. A fixed
+  // 224px column left phones 166px for content and pushed every page sideways.
+  const [open, setOpen] = useState(false);
+  const drawerId = useId();
+
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = overflow;
+    };
+  }, [open]);
+
   return (
-    <aside className="sticky top-0 flex h-screen w-56 shrink-0 flex-col border-r border-hairline bg-canvas">
-      <div className="shrink-0 px-3 pt-4 pb-3">
+    <>
+      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-hairline bg-canvas/90 px-4 backdrop-blur lg:hidden">
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Image src="/logo.png" alt="" width={24} height={24} className="size-6 rounded-full" />
+          <span className="font-display text-[15px] font-semibold text-ink">SEO Maker</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-expanded={open}
+          aria-controls={drawerId}
+          aria-label="Open navigation"
+          className="flex size-11 cursor-pointer items-center justify-center rounded-full text-ink hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Menu className="size-5" aria-hidden />
+        </button>
+      </header>
+
+      {open ? (
+        <div
+          aria-hidden
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+        />
+      ) : null}
+
+    <aside
+      id={drawerId}
+      className={cn(
+        "flex h-dvh w-64 shrink-0 flex-col border-r border-hairline bg-canvas lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-56",
+        open ? "fixed inset-y-0 left-0 z-50" : "hidden",
+      )}
+    >
+      <div className="flex shrink-0 items-center justify-between px-3 pt-4 pb-3">
         <Link
           href="/dashboard"
           className="cursor-pointer flex items-end gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -89,6 +153,14 @@ export function Sidebar({ plan }: { plan: PlanId }) {
             </span>
           </span>
         </Link>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="Close navigation"
+          className="flex size-11 cursor-pointer items-center justify-center rounded-full text-muted-foreground hover:bg-surface-soft hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
+        >
+          <X className="size-4" aria-hidden />
+        </button>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2.5 pb-3">
@@ -144,6 +216,7 @@ export function Sidebar({ plan }: { plan: PlanId }) {
         <ProfileFooter />
       </div>
     </aside>
+    </>
   );
 }
 
@@ -381,18 +454,29 @@ function ProfileFooter() {
   const name = user?.fullName || user?.username || user?.firstName || "Account";
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
 
+  // The server always renders the loading state. When Clerk is already loaded in
+  // the browser (any navigation after the first), the client's first render
+  // would show the user instead and fail hydration. Match the server until mounted.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const ready = mounted && isLoaded;
+
   return (
     <div className="flex items-center gap-2 rounded-2xl bg-surface-soft px-2.5 py-2 ring-1 ring-hairline">
-      <UserButton
-        appearance={{
-          ...clerkDarkAppearance,
-          elements: {
-            avatarBox: "size-8",
-          },
-        }}
-      />
+      {mounted ? (
+        <UserButton
+          appearance={{
+            ...clerkDarkAppearance,
+            elements: {
+              avatarBox: "size-8",
+            },
+          }}
+        />
+      ) : (
+        <span className="size-8 shrink-0 rounded-full bg-surface-card" aria-hidden />
+      )}
       <div className="min-w-0 flex-1">
-        {isLoaded ? (
+        {ready ? (
           <>
             <p className="truncate text-[13px] font-medium leading-4 text-ink" title={name}>
               {name}

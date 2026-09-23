@@ -151,11 +151,14 @@ function Field({
   hint?: string;
   children: React.ReactNode;
 }) {
+  // The hint sits outside the <label> so it is not read as part of the field's name.
   return (
-    <label className="flex flex-col gap-2">
-      <span className="text-sm font-medium text-ink">{label}</span>
-      {children}
-      {hint ? <span className="text-xs leading-5 text-muted-foreground">{hint}</span> : null}
-    </label>
+    <div className="flex flex-col gap-2">
+      <label className="flex flex-col gap-2">
+        <span className="text-sm font-medium text-ink">{label}</span>
+        {children}
+      </label>
+      {hint ? <p className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
+    </div>
   );
 }
