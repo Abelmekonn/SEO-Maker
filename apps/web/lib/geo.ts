@@ -1,5 +1,6 @@
 import {
   GEO_DIMENSION_LABELS,
+  GEO_WEIGHTS,
   type GeoDimensionId,
   type NotMeasuredReason,
 } from "@seo-maker/core/geo";
@@ -134,16 +135,6 @@ export function dimensionRows(
  * shown without this beside it.
  */
 export function measuredCoverage(rows: DimensionRow[]): number {
-  const GEO_WEIGHTS: Record<GeoDimensionId, number> = {
-    entityClarity: 20,
-    contentExtractability: 15,
-    answerCoverage: 15,
-    structuredData: 15,
-    aiCrawlerAccess: 15,
-    citationReadiness: 10,
-    businessInfo: 10,
-  };
-
   return (
     rows
       .filter((row) => row.value != null)
