@@ -8,6 +8,18 @@ import { prisma } from "@seo-maker/db";
 /** Project-level states that mean a GEO run is in flight. */
 export const GEO_ACTIVE = new Set(["queued", "running"]);
 
+export function relativeTime(date: Date | null | undefined) {
+  if (!date) return null;
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 export type DimensionRow = {
   id: GeoDimensionId;
   label: string;
