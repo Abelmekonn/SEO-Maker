@@ -273,9 +273,14 @@ function classifyContext(project: {
   analysisMode: string;
   servicesProducts: unknown;
   businessType: string | null;
-}): { offerings?: string[]; offeringKind?: "product" | "service" } {
+  pageTypeOverrides?: unknown;
+}): { offerings?: string[]; offeringKind?: "product" | "service"; overrides?: Record<string, string> } {
+  const overrides =
+    project.pageTypeOverrides && typeof project.pageTypeOverrides === "object"
+      ? (project.pageTypeOverrides as Record<string, string>)
+      : undefined;
   if (project.analysisMode !== "deep" || !Array.isArray(project.servicesProducts)) {
-    return {};
+    return { overrides };
   }
   const offerings = project.servicesProducts.filter(
     (value): value is string => typeof value === "string" && value.trim().length > 0,
@@ -283,5 +288,5 @@ function classifyContext(project: {
   const offeringKind = /service|agency|consult|clinic|studio|firm|practice/i.test(project.businessType ?? "")
     ? "service"
     : "product";
-  return { offerings, offeringKind };
+  return { offerings, offeringKind, overrides };
 }

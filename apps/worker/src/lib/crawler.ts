@@ -124,11 +124,36 @@ export type CrawlSiteResult = {
   skipped: number;
 };
 
+/**
+ * Pages fetched in parallel within one crawl.
+ *
+ * 3 by default. Crawling is network wait plus Cheerio parsing on one Node
+ * thread, so this is requests in flight, not CPU cores. Measured on a 4-core
+ * i7 over 40 pages of stripe.com: 34s at 2 and 21s at 3, with the crawler using
+ * 27% and 38% of a single core and ~480 MB either way. Override with
+ * CRAWL_CONCURRENCY (1-4); above 4 the load on the crawled site stops being
+ * polite.
+ */
+function crawlConcurrency(): number {
+  const value = Number(process.env.CRAWL_CONCURRENCY);
+  return Number.isFinite(value) && value >= 1 ? Math.min(4, Math.floor(value)) : 3;
+}
+
+/**
+ * Longest robots.txt Crawl-delay honoured, in seconds. A site asking for a
+ * delay is crawled one request at a time with that gap; the cap keeps a
+ * 100-page crawl inside the crawl worker's 15-minute job lock.
+ */
+const MAX_CRAWL_DELAY_SECS = 5;
+
 export type CrawlHooks = {
   onPage?: (audit: PageAudit) => Promise<void>;
   onFailure?: (failure: PageFailure) => Promise<void>;
   /** Business context that sharpens page classification (Deep mode). */
-  classify?: Pick<ClassifyInput, "offerings" | "offeringKind">;
+  classify?: Pick<ClassifyInput, "offerings" | "offeringKind"> & {
+    /** Page types the user set, by URL path. They win over classification. */
+    overrides?: Record<string, string>;
+  };
 };
 
 export async function crawlSite(
@@ -164,6 +189,8 @@ export async function crawlSite(
   });
 
   const sitemapSet = new Set(sitemap.urls);
+  const crawlDelay =
+    group?.crawlDelay && group.crawlDelay > 0 ? Math.min(group.crawlDelay, MAX_CRAWL_DELAY_SECS) : 0;
   const robotsAudit = buildRobotsAudit({
     url: robots.url,
     status: robots.status,
@@ -198,7 +225,9 @@ export async function crawlSite(
       // on stripe.com 24 of 97 successful fetches were exactly this, and the
       // crawl came back 27 pages short of its budget.
       maxRequestsPerCrawl: Math.ceil(limit * REQUEST_SLACK),
-      maxConcurrency: 2,
+      // A site that sets Crawl-delay gets one request at a time, that far apart.
+      maxConcurrency: crawlDelay ? 1 : crawlConcurrency(),
+      ...(crawlDelay ? { sameDomainDelaySecs: crawlDelay } : {}),
       maxRequestRetries: 1,
       requestHandlerTimeoutSecs: 30,
       preNavigationHooks: [
@@ -303,7 +332,8 @@ export async function crawlSite(
           (extracted.robotsMeta?.includes("noindex") ?? false) ||
           (xRobotsTag?.includes("noindex") ?? false);
 
-        const classification = classifyPage({
+        const override = hooks?.classify?.overrides?.[loaded.pathname || "/"];
+        const classified = classifyPage({
           url: loadedUrl,
           title: extracted.title,
           h1: extracted.h1,
@@ -312,6 +342,10 @@ export async function crawlSite(
           offerings: hooks?.classify?.offerings,
           offeringKind: hooks?.classify?.offeringKind,
         });
+        // The user's own statement of what a page is outranks every heuristic.
+        const classification = override
+          ? { type: override as typeof classified.type, confidence: 1, evidence: ["Set by you"] }
+          : classified;
         const intent = inferSearchIntent({
           pageType: classification.type,
           title: extracted.title,
