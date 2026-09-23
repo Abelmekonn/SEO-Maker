@@ -70,12 +70,12 @@ export const checks: { id: CheckId; label: string; hint: string }[] = [
   { id: "status", label: "Status code", hint: "Responds with 2xx or 3xx" },
   { id: "title", label: "Title", hint: "Has a title tag" },
   { id: "meta", label: "Meta description", hint: "Has a meta description" },
-  { id: "h1", label: "H1", hint: "Has one H1" },
+  { id: "h1", label: "H1", hint: "Has a top-level heading" },
   { id: "h2", label: "H2", hint: "Has at least one H2" },
   { id: "canonical", label: "Canonical", hint: "Declares a canonical URL" },
   { id: "images", label: "Image alt text", hint: "Every image has alt text" },
   { id: "links", label: "Internal links", hint: "Links to other pages on the site" },
-  { id: "words", label: "Word count", hint: `At least ${THIN_WORDS} words` },
+  { id: "words", label: "Word count", hint: "Enough content to cover the topic" },
   { id: "schema", label: "Schema", hint: "Has JSON-LD structured data" },
   { id: "indexability", label: "Indexability", hint: "Not blocked by noindex" },
   { id: "robots", label: "robots.txt", hint: "robots.txt is reachable" },
@@ -206,7 +206,9 @@ export function checkValue(
     case "words":
       return {
         value: count(page.wordCount ?? 0, "word"),
-        detail: isThin(page) ? `Under ${THIN_WORDS} words reads as thin content.` : undefined,
+        detail: isThin(page)
+          ? "Short enough that it may not cover the topic fully."
+          : undefined,
       };
     case "schema":
       return { value: count(page.schemaCount ?? 0, "JSON-LD block") };
@@ -377,17 +379,36 @@ export type PageIssueRecord = {
   recommendation: string | null;
 };
 
+/**
+ * The deterministic fallback recommendation per check.
+ *
+ * Wording is constrained by the knowledge corpus, which records that several
+ * long-standing SEO rules are not in any Google documentation. Four of these
+ * used to state them anyway:
+ *
+ *  - title/meta named character ranges. Google's title-link and snippet docs
+ *    specify no limit; the documented criteria are unique, clear, concise and
+ *    accurate (see `policy-title-meta-length`).
+ *  - h1 asked for exactly one H1. Google states heading order and count do not
+ *    matter for Search (see `policy-headings`).
+ *  - words named the thin-content threshold. Three separate Google documents
+ *    deny a preferred word count, so the threshold stays an internal trigger
+ *    and is never surfaced (see `policy-word-count`).
+ *
+ * These strings now reach the user directly on the page detail screen, so they
+ * must not contradict the knowledge layer rendered beside them.
+ */
 const RECOMMENDATION: Record<CheckId, string> = {
   status: "Return a 2xx response, or remove the URL from internal links and the sitemap.",
-  title: "Add a unique title of roughly 50-60 characters describing this page.",
-  meta: "Add a meta description of roughly 120-160 characters summarising the page.",
-  h1: "Add a single H1 that states what the page is about.",
-  h2: "Break the page into sections with H2 headings.",
+  title: "Give the page a title that is unique to it, clear, and accurate to what the page covers.",
+  meta: "Write a description unique to this page that names its most relevant points.",
+  h1: "Give the page a clear top-level heading that states what it is about.",
+  h2: "Break the page into sections with headings so readers can navigate it.",
   canonical: "Declare a self-referencing canonical link unless this page is a deliberate duplicate.",
-  images: "Add descriptive alt text to every meaningful image, and empty alt to decorative ones.",
+  images: "Add alt text describing each meaningful image's role on the page, and empty alt to decorative ones.",
   links: "Link to this page from related pages so it is reachable and passes context.",
-  words: `Expand the page past ${THIN_WORDS} words of genuine content, or merge it into a stronger page.`,
-  schema: "Add JSON-LD structured data matching what the page represents.",
+  words: "Cover the topic the page promises. Say what a reader needs before they can act, rather than padding length.",
+  schema: "Add JSON-LD structured data matching what the page represents, to be eligible for richer results.",
   indexability: "Make the sitemap and the page's robots directives agree on whether this URL should be indexed.",
   robots: "Serve a reachable robots.txt at the site root.",
   sitemap: "Publish a sitemap and declare it in robots.txt.",

@@ -1,4 +1,6 @@
 import {
+  AI_PAGE_ANALYZE_JOB,
+  AI_PAGE_QUEUE,
   COMPETITOR_ANALYZE_ONE_JOB,
   COMPETITOR_DISCOVER_JOB,
   COMPETITOR_INSIGHTS_JOB,
@@ -6,6 +8,7 @@ import {
   CRAWL_HOMEPAGE_JOB,
   CRAWL_QUEUE,
   RUN_PERFORMANCE_JOB,
+  type AiPageAnalyzeJob,
   type CompetitorAnalyzeOneJob,
   type CompetitorDiscoverJob,
   type CompetitorInsightsJob,
@@ -17,6 +20,8 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 
 export {
+  AI_PAGE_ANALYZE_JOB,
+  AI_PAGE_QUEUE,
   COMPETITOR_ANALYZE_ONE_JOB,
   COMPETITOR_DISCOVER_JOB,
   COMPETITOR_INSIGHTS_JOB,
@@ -26,6 +31,7 @@ export {
   RUN_PERFORMANCE_JOB,
 };
 export type {
+  AiPageAnalyzeJob,
   CompetitorAnalyzeOneJob,
   CompetitorDiscoverJob,
   CompetitorInsightsJob,
@@ -100,6 +106,31 @@ export async function enqueueCompetitorAnalyzeOne(data: CompetitorAnalyzeOneJob)
     backoff: { type: "exponential", delay: 2000 },
     removeOnComplete: 50,
     removeOnFail: 50,
+  });
+}
+
+let aiPageQueue: Queue<AiPageAnalyzeJob> | null = null;
+
+function getAiPageQueue() {
+  if (!aiPageQueue) {
+    aiPageQueue = new Queue<AiPageAnalyzeJob>(AI_PAGE_QUEUE, { connection: getConnection() });
+  }
+  return aiPageQueue;
+}
+
+/**
+ * Queues page analysis on the AI queue (Phase 1.9).
+ *
+ * `attempts: 1` on purpose. The AI layer already retries retryable provider
+ * failures internally and records the outcome as an AiResult row, so a BullMQ
+ * retry on top would re-run the whole job — and spend tokens again — for a
+ * failure that has already been handled and reported.
+ */
+export async function enqueueAiPageAnalysis(data: AiPageAnalyzeJob) {
+  await getAiPageQueue().add(AI_PAGE_ANALYZE_JOB, data, {
+    attempts: 1,
+    removeOnComplete: 100,
+    removeOnFail: 100,
   });
 }
 

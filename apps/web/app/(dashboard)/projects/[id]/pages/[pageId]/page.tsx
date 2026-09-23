@@ -4,9 +4,12 @@ import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/dashboard/shell";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
+import { AiRecommendations } from "@/components/project/AiRecommendations";
 import { PageChecks } from "@/components/project/PageChecks";
+import { PageEvidencePanel } from "@/components/project/PageEvidence";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { StatusBadge } from "@/components/project/StatusBadge";
+import { aiConfigured, getPageRecommendation } from "@/lib/ai-results";
 import { getPageForUser, requireUserId } from "@/lib/projects";
 import { pagePath } from "@/lib/site-url";
 
@@ -27,6 +30,7 @@ export default async function ProjectPageDetailPage({
     notFound();
   }
 
+  const recommendation = await getPageRecommendation(page.id);
   const liveUrl = page.finalUrl ?? page.url;
 
   return (
@@ -61,6 +65,13 @@ export default async function ProjectPageDetailPage({
         }
       />
       <PageChecks page={page} />
+      <AiRecommendations
+        result={recommendation}
+        projectId={id}
+        pageId={page.id}
+        aiEnabled={aiConfigured()}
+      />
+      <PageEvidencePanel page={page} />
     </div>
   );
 }
