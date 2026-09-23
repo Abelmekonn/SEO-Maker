@@ -68,20 +68,30 @@ export async function POST(request: Request) {
       {
         error:
           account.plan === "free"
-            ? "Free includes one project. Open the project you already started."
+            ? "You have already used your one free project. Upgrade to add more sites."
             : `${account.limits.label} includes ${account.limits.maxProjects} projects.`,
+        // Lets the form offer the upgrade path rather than a dead end.
+        upgrade: account.plan === "free",
         id: existing?.id,
       },
       { status: 409 },
     );
   }
 
-  const context = parseBusinessContext(body?.business);
-  const mode = isAnalysisMode(body?.mode)
+  const requested = parseBusinessContext(body?.business);
+  const requestedMode = isAnalysisMode(body?.mode)
     ? body.mode
-    : hasAnyContext(context)
+    : hasAnyContext(requested)
       ? "deep"
       : "quick";
+
+  // Deep mode is a paid capability. Downgrade rather than reject: the user
+  // asked for an analysis of a real site, and refusing the whole request over
+  // an optional extra would be a worse answer than running the quick pass.
+  // Context is dropped with it, so nothing paid-for is stored on a free plan.
+  const allowDeep = account.limits.deepMode;
+  const mode = allowDeep ? requestedMode : "quick";
+  const context = allowDeep ? requested : parseBusinessContext(undefined);
 
   const project = await prisma.project.create({
     include: { pages: true },

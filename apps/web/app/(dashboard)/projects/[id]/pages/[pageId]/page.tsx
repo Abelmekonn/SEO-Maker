@@ -10,6 +10,7 @@ import { PageEvidencePanel } from "@/components/project/PageEvidence";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { StatusBadge } from "@/components/project/StatusBadge";
 import { aiConfigured, getPageRecommendation } from "@/lib/ai-results";
+import { getAccountForUser } from "@/lib/plan";
 import { getPageForUser, requireUserId } from "@/lib/projects";
 import { pagePath } from "@/lib/site-url";
 
@@ -30,7 +31,10 @@ export default async function ProjectPageDetailPage({
     notFound();
   }
 
-  const recommendation = await getPageRecommendation(page.id);
+  const [recommendation, account] = await Promise.all([
+    getPageRecommendation(page.id),
+    getAccountForUser(userId),
+  ]);
   const liveUrl = page.finalUrl ?? page.url;
 
   return (
@@ -70,6 +74,8 @@ export default async function ProjectPageDetailPage({
         projectId={id}
         pageId={page.id}
         aiEnabled={aiConfigured()}
+        planAllowsAi={account.limits.ai}
+        planLabel={account.limits.label}
       />
       <PageEvidencePanel page={page} />
     </div>

@@ -23,10 +23,20 @@ const DEEP_FIELDS = [
 
 type DeepKey = (typeof DEEP_FIELDS)[number]["key"];
 
-export function UrlIntakeForm({ initialUrl = "" }: { initialUrl?: string }) {
+export function UrlIntakeForm({
+  initialUrl = "",
+  canUseDeep = true,
+  planLabel,
+}: {
+  initialUrl?: string;
+  /** False on plans without Deep. The mode selector is then not offered at all. */
+  canUseDeep?: boolean;
+  planLabel?: string;
+}) {
   const router = useRouter();
   const [url, setUrl] = useState(initialUrl);
   const [mode, setMode] = useState<"quick" | "deep">("quick");
+  const [upgrade, setUpgrade] = useState(false);
   const [business, setBusiness] = useState<Record<DeepKey, string>>({
     businessName: "",
     businessType: "",
@@ -62,13 +72,14 @@ export function UrlIntakeForm({ initialUrl = "" }: { initialUrl?: string }) {
     });
 
     const data = (await response.json().catch(() => null)) as
-      | { id?: string; error?: string }
+      | { id?: string; error?: string; upgrade?: boolean }
       | null;
 
-    if (response.status === 409 && data?.id) {
+    if (response.status === 409) {
+      setUpgrade(Boolean(data?.upgrade));
       setPending(false);
-      setExistingId(data.id);
-      setError(data.error ?? "Free includes one project.");
+      setExistingId(data?.id ?? null);
+      setError(data?.error ?? "You have already used your one free project.");
       return;
     }
 
@@ -103,6 +114,7 @@ export function UrlIntakeForm({ initialUrl = "" }: { initialUrl?: string }) {
           className="h-11 rounded-md border border-hairline bg-canvas px-3 text-sm text-ink outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
+      {canUseDeep ? (
       <fieldset className="flex flex-col gap-3">
         <legend className="text-sm font-medium text-ink">How deep should we go?</legend>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -122,8 +134,21 @@ export function UrlIntakeForm({ initialUrl = "" }: { initialUrl?: string }) {
           />
         </div>
       </fieldset>
+      ) : (
+        <p className="text-sm leading-6 text-body">
+          Every technical and on-page check runs on {planLabel ? `${planLabel}` : "your plan"}.
+          Deep analysis adds business context so recommendations are specific to you —{" "}
+          <Link
+            href="/pricing"
+            className="text-brand-accent underline underline-offset-4 hover:text-ink"
+          >
+            see plans
+          </Link>
+          .
+        </p>
+      )}
 
-      {mode === "deep" ? (
+      {canUseDeep && mode === "deep" ? (
         <div className="grid gap-4 rounded-lg bg-canvas p-4 ring-1 ring-hairline sm:grid-cols-2">
           {DEEP_FIELDS.map((entry) => (
             <label key={entry.key} className="flex flex-col gap-2">
@@ -151,14 +176,24 @@ export function UrlIntakeForm({ initialUrl = "" }: { initialUrl?: string }) {
           <p id="project-url-error" role="alert" className="text-sm text-ink">
             {error}
           </p>
-          {existingId ? (
-            <Link
-              href={`/projects/${existingId}`}
-              className="text-sm underline underline-offset-4 hover:text-ink"
-            >
-              Open your project
-            </Link>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-4">
+            {existingId ? (
+              <Link
+                href={`/projects/${existingId}`}
+                className="text-sm underline underline-offset-4 hover:text-ink"
+              >
+                Open your project
+              </Link>
+            ) : null}
+            {upgrade ? (
+              <Link
+                href="/pricing"
+                className="inline-flex h-10 items-center rounded-md bg-primary px-4 font-mono text-sm text-on-primary transition-colors hover:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Go premium
+              </Link>
+            ) : null}
+          </div>
         </div>
       ) : (
         <p className="text-sm text-body">

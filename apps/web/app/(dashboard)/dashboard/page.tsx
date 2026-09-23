@@ -22,6 +22,7 @@ export default async function DashboardPage() {
       planLabel={account.limits.label}
       maxProjects={account.limits.maxProjects}
       maxPages={account.limits.maxPages}
+      canUseDeep={account.limits.deepMode}
       projects={projects}
     />
   );

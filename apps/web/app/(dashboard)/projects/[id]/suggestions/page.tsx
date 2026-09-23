@@ -5,6 +5,8 @@ import { prisma } from "@seo-maker/db";
 import { PageHeader } from "@/components/dashboard/shell";
 import { AnalyzeButton } from "@/components/project/AnalyzeButton";
 import { aiConfigured, getProjectRecommendations } from "@/lib/ai-results";
+import { UpgradePrompt } from "@/components/project/UpgradePrompt";
+import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { pagePath } from "@/lib/site-url";
 import { cn } from "@/lib/utils";
@@ -34,6 +36,9 @@ export default async function ProjectSuggestionsPage({
   }
 
   const pageIds = project.pages.map((page) => page.id);
+
+  const account = await getAccountForUser(userId);
+  const planAllowsAi = account.limits.ai;
 
   const [issueCounts, results] = await Promise.all([
     prisma.pageIssue.groupBy({
@@ -65,6 +70,7 @@ export default async function ProjectSuggestionsPage({
         title="AI Suggestions"
         description={`${project.name}. Explanations grounded in each page's crawl evidence and the SEO knowledge base.`}
         actions={
+          !planAllowsAi ? null : (
           <AnalyzeButton
             projectId={project.id}
             label={analysed > 0 ? "Re-analyse all" : "Analyse pages"}
@@ -76,8 +82,17 @@ export default async function ProjectSuggestionsPage({
             }
             force={analysed > 0}
           />
+          )
         }
       />
+
+      {!planAllowsAi ? (
+        <UpgradePrompt
+          title="AI explanations are a paid feature"
+          body="Every problem on your pages is already found and listed under Pages - that does not change on any plan. Upgrade to get the explanation of why each one matters and what to change, grounded in the SEO knowledge base."
+          planLabel={account.limits.label}
+        />
+      ) : null}
 
       {project.pages.length === 0 ? (
         <Empty

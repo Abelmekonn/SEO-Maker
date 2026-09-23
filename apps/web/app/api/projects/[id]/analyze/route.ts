@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
 import { aiConfigured } from "@/lib/ai-results";
+import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { enqueueAiPageAnalysis } from "@/lib/queue";
 
@@ -19,6 +20,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "Sign in to run analysis." }, { status: 401 });
+  }
+
+  // Plan gate before the provider check: a free user should be told they need
+  // to upgrade, not that the server is missing a key. Enforced here and not
+  // only in the UI, because a hidden button is not an access control.
+  const account = await getAccountForUser(userId);
+  if (!account.limits.ai) {
+    return NextResponse.json(
+      {
+        error: `${account.limits.label} finds the problems on your pages. AI explanations and fixes are a paid feature.`,
+        upgrade: true,
+      },
+      { status: 402 },
+    );
   }
 
   if (!aiConfigured()) {

@@ -32,12 +32,14 @@ export function ProjectsHome({
   planLabel,
   maxProjects,
   maxPages,
+  canUseDeep = true,
   projects,
 }: {
   firstName: string | null;
   planLabel: string;
   maxProjects: number;
   maxPages: number;
+  canUseDeep?: boolean;
   projects: ProjectRow[];
 }) {
   const sites = projects.map(toSite);
@@ -91,7 +93,7 @@ export function ProjectsHome({
               Paste the homepage URL. We crawl it and this dashboard will list that site here.
             </p>
           </div>
-          <UrlIntakeForm />
+          <UrlIntakeForm canUseDeep={canUseDeep} planLabel={planLabel} />
         </section>
       ) : (
         <>

@@ -1,6 +1,7 @@
 import { Sparkles } from "lucide-react";
 import type { PageAiResult } from "@/lib/ai-results";
 import { AnalyzeButton } from "@/components/project/AnalyzeButton";
+import { UpgradePrompt } from "@/components/project/UpgradePrompt";
 import { cn } from "@/lib/utils";
 
 /**
@@ -27,11 +28,16 @@ export function AiRecommendations({
   projectId,
   pageId,
   aiEnabled,
+  planAllowsAi = true,
+  planLabel,
 }: {
   result: PageAiResult | null;
   projectId: string;
   pageId: string;
   aiEnabled: boolean;
+  /** False on plans without AI. The findings above stay fully visible. */
+  planAllowsAi?: boolean;
+  planLabel?: string;
 }) {
   const disabledReason = aiEnabled
     ? undefined
@@ -49,16 +55,24 @@ export function AiRecommendations({
             Explanations grounded in this page&apos;s evidence and the SEO knowledge base.
           </p>
         </div>
-        <AnalyzeButton
-          projectId={projectId}
-          pageId={pageId}
-          label={result ? "Re-analyse" : "Analyse this page"}
-          disabledReason={disabledReason}
-          force={Boolean(result)}
-        />
+        {planAllowsAi ? (
+          <AnalyzeButton
+            projectId={projectId}
+            pageId={pageId}
+            label={result ? "Re-analyse" : "Analyse this page"}
+            disabledReason={disabledReason}
+            force={Boolean(result)}
+          />
+        ) : null}
       </div>
 
-      {!result ? (
+      {!planAllowsAi ? (
+        <UpgradePrompt
+          title="AI explanations are a paid feature"
+          body="Your plan finds every problem on this page - the checks above are complete. Upgrade to get the explanation of why each one matters and what to change."
+          planLabel={planLabel}
+        />
+      ) : !result ? (
         <Empty>
           No analysis has run for this page yet. Queue one to get explanations for the failing
           checks above.
