@@ -15,6 +15,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
+import { DeleteProjectButton } from "@/components/project/DeleteProjectButton";
 import { GoPremiumButton } from "@/components/project/PremiumGate";
 import { StatusBadge } from "@/components/project/StatusBadge";
 import { checks, failedChecks, isCrawled, siteSeoScore } from "@/lib/page-audit";
@@ -233,7 +234,7 @@ export function ProjectsHome({
                       <th className="px-5 py-3 font-medium">Mobile</th>
                       <th className="px-5 py-3 font-medium">Problems</th>
                       <th className="px-5 py-3 font-medium">
-                        <span className="sr-only">Open</span>
+                        <span className="sr-only">Actions</span>
                       </th>
                     </tr>
                   </thead>
@@ -268,13 +269,16 @@ export function ProjectsHome({
                         </td>
                         <td className="px-5 py-3 font-mono text-sm tabular-nums text-ink">{site.problems}</td>
                         <td className="px-5 py-3">
-                          <Link
-                            href={`/projects/${site.id}`}
-                            className="inline-flex h-11 items-center gap-1 font-mono text-[12px] text-body hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          >
-                            Open
-                            <ArrowUpRight className="size-3.5" aria-hidden />
-                          </Link>
+                          <div className="flex items-center justify-end gap-1">
+                            <Link
+                              href={`/projects/${site.id}`}
+                              className="inline-flex h-11 items-center gap-1 px-2 font-mono text-[12px] text-body hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              Open
+                              <ArrowUpRight className="size-3.5" aria-hidden />
+                            </Link>
+                            <DeleteProjectButton projectId={site.id} siteName={site.host} redirectTo="/dashboard" />
+                          </div>
                         </td>
                       </tr>
                     ))}

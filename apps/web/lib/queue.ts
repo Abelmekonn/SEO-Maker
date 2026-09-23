@@ -202,3 +202,22 @@ export async function getCrawlQueueState(projectId: string): Promise<{
   return { workerOnline: workers > 0, waitingPosition: index === -1 ? null : index + 1 };
 }
 
+/**
+ * Removes a project's jobs that have not started, from every queue, so a
+ * deleted site is not crawled or analysed afterwards. A job already running
+ * finds its project gone and stops on its own.
+ */
+export async function removeProjectJobs(projectId: string): Promise<number> {
+  const queues = [getCrawlQueue(), getCompetitorQueue(), getAiPageQueue()];
+  let removed = 0;
+  for (const queue of queues) {
+    const jobs = await queue.getJobs(["waiting", "prioritized", "delayed", "paused"], 0, 999);
+    for (const job of jobs) {
+      if (job?.data && "projectId" in job.data && job.data.projectId === projectId) {
+        await job.remove().catch(() => undefined);
+        removed += 1;
+      }
+    }
+  }
+  return removed;
+}

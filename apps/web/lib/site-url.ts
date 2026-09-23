@@ -68,3 +68,19 @@ export function pagePath(url: string) {
     return url;
   }
 }
+
+/**
+ * A site's identity for "is this already added?": lower-cased host without
+ * "www.", plus any path, without query, fragment or trailing slash. Matches
+ * the backfill in the project_site_key migration, so old and new rows agree.
+ */
+export function siteKeyOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const path = parsed.pathname.toLowerCase().replace(/\/+$/, "");
+    return `${host}${path}`;
+  } catch {
+    return url.toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+  }
+}

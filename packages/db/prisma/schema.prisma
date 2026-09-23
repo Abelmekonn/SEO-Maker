@@ -65,6 +65,11 @@ model Project {
   /// survives re-crawls, and they unblock AI fixes that need a known type.
   pageTypeOverrides Json?
 
+  /// Normalised site identity: host without "www.", plus any path, lower-cased
+  /// ("stripe.com", "example.com/blog"). Unique per user, so the same site
+  /// cannot be added twice; re-crawling it is the way to refresh it.
+  siteKey String?
+
   /// The crawl whose pages the dashboard shows. Older crawls are kept for history.
   latestCrawlId String?
 
@@ -77,6 +82,7 @@ model Project {
   opportunities     Opportunity[]
   aiResults         AiResult[]
 
+  @@unique([userId, siteKey])
   @@index([userId])
 }
 

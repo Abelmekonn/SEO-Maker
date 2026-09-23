@@ -10,7 +10,7 @@ import {
 import { getAccountForUser } from "@/lib/plan";
 import { requireUserId } from "@/lib/projects";
 import { enqueueHomepageCrawl } from "@/lib/queue";
-import { normalizeSiteUrl } from "@/lib/site-url";
+import { normalizeSiteUrl, siteKeyOf } from "@/lib/site-url";
 
 export async function GET() {
   const userId = await requireUserId();
@@ -56,6 +56,25 @@ export async function POST(request: Request) {
     );
   }
 
+  // One project per site. Re-crawling is how a site is refreshed; adding it
+  // again would split its history across two projects. The unique index on
+  // (userId, siteKey) enforces this too; checking first gives a useful answer.
+  const siteKey = siteKeyOf(normalized.href);
+  const duplicate = await prisma.project.findFirst({
+    where: { userId, OR: [{ siteKey }, { rootUrl: normalized.href }] },
+    select: { id: true, name: true },
+  });
+  if (duplicate) {
+    return NextResponse.json(
+      {
+        error: `You already added ${siteKey}. Open it and use Crawl site to refresh it.`,
+        duplicate: true,
+        id: duplicate.id,
+      },
+      { status: 409 },
+    );
+  }
+
   const account = await getAccountForUser(userId);
   const projectCount = await prisma.project.count({ where: { userId } });
 
@@ -93,11 +112,14 @@ export async function POST(request: Request) {
   const mode = allowDeep ? requestedMode : "quick";
   const context = allowDeep ? requested : parseBusinessContext(undefined);
 
-  const project = await prisma.project.create({
+  let project;
+  try {
+    project = await prisma.project.create({
     include: { pages: true },
     data: {
       userId,
       rootUrl: normalized.href,
+      siteKey,
       name: context.businessName ?? normalized.hostname,
       maxPages: account.limits.maxPages,
       status: "pending",
@@ -112,6 +134,16 @@ export async function POST(request: Request) {
       },
     },
   });
+  } catch (error) {
+    // Two submits of the same site racing past the check above.
+    if ((error as { code?: string }).code === "P2002") {
+      return NextResponse.json(
+        { error: `You already added ${siteKey}.`, duplicate: true },
+        { status: 409 },
+      );
+    }
+    throw error;
+  }
 
   const homepage = project.pages[0];
   if (homepage) {
