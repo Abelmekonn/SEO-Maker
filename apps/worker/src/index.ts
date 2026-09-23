@@ -73,13 +73,16 @@ competitorWorker.on("failed", (job, error) => {
 });
 
 /**
- * AI runs on its own queue (Phase 1.9) at concurrency 2.
+ * AI runs on its own queue (Phase 1.9).
  *
- * Separate from the crawler so a slow provider can never stall a crawl, and
- * concurrency above 1 because these jobs are almost entirely network wait.
- * Retries are bounded inside the AI layer, so BullMQ does not retry on top:
- * a failed generation is already a recorded AiResult row.
+ * Separate from the crawler so a slow provider can never stall a crawl.
+ * Concurrency defaults to 1: on Groq's free tier (8,000 tokens per minute) one
+ * page prompt is ~6,500 tokens, so two concurrent jobs always collide on the
+ * rate limit and one of them burns its retries waiting. Raise AI_PAGE_CONCURRENCY
+ * on a higher provider tier. Retries are bounded inside the AI layer, so BullMQ
+ * does not retry on top: a failed generation is already a recorded AiResult row.
  */
+const aiConcurrency = Math.max(1, Number(process.env.AI_PAGE_CONCURRENCY) || 1);
 const aiPageWorker = new Worker<AiPageAnalyzeJob>(
   AI_PAGE_QUEUE,
   async (job) => {
@@ -93,7 +96,7 @@ const aiPageWorker = new Worker<AiPageAnalyzeJob>(
 
     throw new Error(`Unknown job name: ${job.name}`);
   },
-  { connection, concurrency: 2, lockDuration: 5 * 60 * 1000 },
+  { connection, concurrency: aiConcurrency, lockDuration: 5 * 60 * 1000 },
 );
 
 aiPageWorker.on("failed", (job, error) => {

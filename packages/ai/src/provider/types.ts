@@ -69,17 +69,25 @@ export class AiError extends Error {
   readonly status: number | null;
   /** Provider response body or validation detail, for the AiResult.error column. */
   readonly detail: string | null;
+  /** How long the provider asked us to wait before retrying, when it said. */
+  readonly retryAfterMs: number | null;
 
   constructor(
     kind: AiErrorKind,
     message: string,
-    options: { retryable?: boolean; status?: number | null; detail?: string | null } = {},
+    options: {
+      retryable?: boolean;
+      status?: number | null;
+      detail?: string | null;
+      retryAfterMs?: number | null;
+    } = {},
   ) {
     super(message);
     this.name = "AiError";
     this.kind = kind;
     this.status = options.status ?? null;
     this.detail = options.detail ?? null;
+    this.retryAfterMs = options.retryAfterMs ?? null;
     this.retryable = options.retryable ?? defaultRetryable(kind);
   }
 }

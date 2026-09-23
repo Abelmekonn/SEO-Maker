@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { generateStructured, OpenAiCompatibleProvider, parseAndValidate } from "./index";
+import { generateStructured, OpenAiCompatibleProvider, parseAndValidate, parseRetryAfter } from "./index";
 import { AiError, type AiProvider, type StructuredRequest } from "./types";
 
 const schema = z.object({ answer: z.string(), score: z.number() });
@@ -199,5 +199,71 @@ describe("provider error classification", () => {
     const error = await callWith(429, '{"error":{"message":"slow down"}}');
     expect(error.kind).toBe("rate-limited");
     expect(error.retryable).toBe(true);
+  });
+});
+
+describe("rate-limit waits", () => {
+  const groq429 =
+    '{"error":{"message":"Rate limit reached ... on tokens per minute (TPM): Limit 8000, Used 6957, Requested 6450. Please try again in 40.5525s. Need more tokens?"}}';
+
+  it("reads the wait from the retry-after header first", () => {
+    expect(parseRetryAfter("12", groq429)).toBe(12_000);
+  });
+
+  it("reads Groq's stated wait from the message", () => {
+    expect(parseRetryAfter(null, groq429)).toBe(40_553);
+    expect(parseRetryAfter(null, "Please try again in 1m2.5s.")).toBe(62_500);
+    expect(parseRetryAfter(null, "Please try again in 500ms.")).toBe(500);
+  });
+
+  it("returns null when the provider does not say", () => {
+    expect(parseRetryAfter(null, '{"error":{"message":"Too many requests"}}')).toBeNull();
+  });
+
+  it("waits as long as the provider asks, then succeeds", async () => {
+    let calls = 0;
+    const waits: number[] = [];
+    const provider = fakeProvider(async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw new AiError("rate-limited", "limited", { status: 429, retryAfterMs: 40_000 });
+      }
+      return { data: { answer: "a", score: 1 }, raw: "", model: "m", provider: "fake", usage: { input: 1, output: 1 }, latencyMs: 1, attempts: 1 };
+    });
+
+    const result = await generateStructured(request(), {
+      provider,
+      maxRetries: 0,
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    });
+
+    expect(result.data.answer).toBe("a");
+    expect(waits).toHaveLength(1);
+    expect(waits[0]).toBeGreaterThanOrEqual(40_000);
+    expect(waits[0]).toBeLessThan(42_000);
+  });
+
+  it("fails straight away when the wait is longer than a job should hold a worker", async () => {
+    const provider = fakeProvider(async () => {
+      throw new AiError("rate-limited", "daily quota", { status: 429, retryAfterMs: 3_600_000 });
+    });
+
+    await expect(generateStructured(request(), { provider, sleep: noSleep })).rejects.toMatchObject({
+      kind: "rate-limited",
+    });
+    expect(provider.calls).toBe(1);
+  });
+
+  it("gives up after a bounded number of rate-limit waits", async () => {
+    const provider = fakeProvider(async () => {
+      throw new AiError("rate-limited", "limited", { status: 429, retryAfterMs: 1_000 });
+    });
+
+    await expect(generateStructured(request(), { provider, maxRetries: 0, sleep: noSleep })).rejects.toMatchObject({
+      kind: "rate-limited",
+    });
+    expect(provider.calls).toBe(4);
   });
 });

@@ -10,7 +10,7 @@ import { OpenAiCompatibleProvider } from "./groq";
 import { AiError, type AiProvider, type StructuredRequest, type StructuredResponse } from "./types";
 
 export { AiError } from "./types";
-export { parseAndValidate, OpenAiCompatibleProvider } from "./groq";
+export { parseAndValidate, parseRetryAfter, OpenAiCompatibleProvider } from "./groq";
 export type { AiProvider, StructuredRequest, StructuredResponse, AiErrorKind, TokenUsage } from "./types";
 
 let cached: { provider: AiProvider; config: AiConfig } | null = null;
@@ -54,6 +54,19 @@ export type GenerateOptions = {
   sleep?: (ms: number) => Promise<void>;
 };
 
+/**
+ * Rate limits get their own, longer budget.
+ *
+ * A per-minute token limit (Groq's free tier is 8,000 TPM, and one page prompt
+ * is ~7,000 tokens) clears in under a minute. Exponential backoff from 400ms
+ * spends every retry inside the same window and fails a job that would have
+ * succeeded 40 seconds later. So a 429 waits as long as the provider asks, up
+ * to a cap that keeps a job inside the AI worker's 5 minute lock; a longer
+ * wait (a daily quota) fails straight away instead of holding a worker slot.
+ */
+const RATE_LIMIT_RETRIES = 3;
+const MAX_RATE_LIMIT_WAIT_MS = 65_000;
+
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -72,6 +85,7 @@ export async function generateStructured<T>(
   const sleep = options.sleep ?? defaultSleep;
 
   let lastError: AiError | null = null;
+  let rateLimitWaits = 0;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
     try {
@@ -86,6 +100,18 @@ export async function generateStructured<T>(
             });
 
       lastError = aiError;
+
+      if (aiError.kind === "rate-limited" && aiError.retryAfterMs != null) {
+        if (aiError.retryAfterMs > MAX_RATE_LIMIT_WAIT_MS || rateLimitWaits >= RATE_LIMIT_RETRIES) {
+          throw aiError;
+        }
+        rateLimitWaits += 1;
+        // A rate-limit wait is not a failed attempt at the task itself, so it
+        // does not use up the ordinary retry budget.
+        attempt -= 1;
+        await sleep(aiError.retryAfterMs + 250 + Math.floor(Math.random() * 750));
+        continue;
+      }
 
       if (!aiError.retryable || attempt > maxRetries) {
         throw aiError;

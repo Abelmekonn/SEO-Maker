@@ -36,7 +36,7 @@ export type AiConfig = {
 
 const DEFAULTS = {
   provider: "groq",
-  model: "llama-3.3-70b-versatile",
+  model: "openai/gpt-oss-120b",
   baseUrl: "https://api.groq.com/openai/v1",
   timeoutMs: 45_000,
   maxRetries: 2,

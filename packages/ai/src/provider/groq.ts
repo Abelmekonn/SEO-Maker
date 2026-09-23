@@ -85,7 +85,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
     const bodyText = await response.text();
 
     if (!response.ok) {
-      throw providerError(response.status, bodyText);
+      throw providerError(response.status, bodyText, response.headers.get("retry-after"));
     }
 
     let body: ChatResponse;
@@ -121,7 +121,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
   }
 }
 
-function providerError(status: number, body: string): AiError {
+function providerError(status: number, body: string, retryAfter: string | null = null): AiError {
   const detail = body.slice(0, 500);
 
   if (status === 401) {
@@ -144,9 +144,39 @@ function providerError(status: number, body: string): AiError {
     );
   }
   if (status === 429) {
-    return new AiError("rate-limited", "The AI provider rate-limited the request.", { status, detail });
+    return new AiError("rate-limited", "The AI provider rate-limited the request.", {
+      status,
+      detail,
+      retryAfterMs: parseRetryAfter(retryAfter, body),
+    });
   }
   return new AiError("provider-error", `The AI provider returned ${status}.`, { status, detail });
+}
+
+/**
+ * How long a 429 asks us to wait, in milliseconds, or null if it does not say.
+ *
+ * Prefers the standard `retry-after` header (seconds). Groq also states the
+ * wait in the message ("Please try again in 40.5s", "in 1m2.5s", "in 500ms"),
+ * which is the only source when the header is absent.
+ */
+export function parseRetryAfter(header: string | null, body: string): number | null {
+  const seconds = header == null ? Number.NaN : Number(header.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000);
+  }
+
+  const match = /try again in\s+((?:\d+(?:\.\d+)?(?:h|ms|m|s))+)/i.exec(body);
+  if (!match) {
+    return null;
+  }
+  let total = 0;
+  for (const part of match[1].matchAll(/(\d+(?:\.\d+)?)(h|ms|m|s)/g)) {
+    const value = Number(part[1]);
+    const unit = part[2];
+    total += unit === "h" ? value * 3_600_000 : unit === "m" ? value * 60_000 : unit === "s" ? value * 1000 : value;
+  }
+  return total > 0 ? Math.ceil(total) : null;
 }
 
 /**
