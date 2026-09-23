@@ -3,8 +3,10 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { ArrowRight, Globe, Layers, Lock, Zap } from "lucide-react";
+import { GoPremiumButton } from "@/components/project/PremiumGate";
 import { normalizeSiteUrl } from "@/lib/site-url";
+import { cn } from "@/lib/utils";
 
 /**
  * Quick starts from the URL alone (Phase 0.6). Deep collects business context
@@ -26,12 +28,13 @@ type DeepKey = (typeof DEEP_FIELDS)[number]["key"];
 export function UrlIntakeForm({
   initialUrl = "",
   canUseDeep = true,
-  planLabel,
+  maxPages,
 }: {
   initialUrl?: string;
-  /** False on plans without Deep. The mode selector is then not offered at all. */
+  /** False on plans without Deep. The Deep option is then shown locked. */
   canUseDeep?: boolean;
-  planLabel?: string;
+  /** Pages the first crawl covers on this plan. */
+  maxPages?: number;
 }) {
   const router = useRouter();
   const [url, setUrl] = useState(initialUrl);
@@ -94,62 +97,101 @@ export function UrlIntakeForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex max-w-xl flex-col gap-4">
+    <form onSubmit={onSubmit} className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <label htmlFor="project-url" className="text-sm font-medium text-ink">
-          Site URL
+        <label htmlFor="project-url" className="font-mono text-[12px] text-muted-foreground">
+          Website address
         </label>
-        <input
-          id="project-url"
-          name="url"
-          type="text"
-          inputMode="url"
-          autoComplete="url"
-          required
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder="example.com"
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? "project-url-error" : undefined}
-          className="h-11 rounded-md border border-hairline bg-canvas px-3 text-sm text-ink outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        />
+        <div
+          className={cn(
+            "flex h-14 items-center gap-3 rounded-2xl bg-canvas px-4 ring-1 transition-shadow focus-within:ring-2 focus-within:ring-ring",
+            error ? "ring-bad/60" : "ring-hairline",
+          )}
+        >
+          <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <input
+            id="project-url"
+            name="url"
+            type="text"
+            inputMode="url"
+            autoComplete="url"
+            autoFocus
+            required
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="yourwebsite.com"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? "project-url-error" : "project-url-hint"}
+            className="h-full min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        {error ? (
+          <div className="flex flex-col gap-2">
+            <p id="project-url-error" role="alert" className="text-sm text-bad">
+              {error}
+            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              {existingId ? (
+                <Link
+                  href={`/projects/${existingId}`}
+                  className="text-sm text-ink underline underline-offset-4 hover:text-primary"
+                >
+                  Open your project
+                </Link>
+              ) : null}
+              {upgrade ? <GoPremiumButton /> : null}
+            </div>
+          </div>
+        ) : (
+          <p id="project-url-hint" className="text-xs leading-5 text-muted-foreground">
+            The homepage address is enough, with or without https://.
+          </p>
+        )}
       </div>
-      {canUseDeep ? (
+
       <fieldset className="flex flex-col gap-3">
-        <legend className="text-sm font-medium text-ink">How deep should we go?</legend>
+        <legend className="mb-2 font-mono text-[12px] text-muted-foreground">Analysis</legend>
         <div className="grid gap-3 sm:grid-cols-2">
           <ModeCard
             id="mode-quick"
+            icon={Zap}
             checked={mode === "quick"}
             onSelect={() => setMode("quick")}
             title="Quick check"
-            description="Starts straight away from the URL. Every technical and on-page check runs."
+            description="Starts straight away. Every technical and on-page check runs."
           />
-          <ModeCard
-            id="mode-deep"
-            checked={mode === "deep"}
-            onSelect={() => setMode("deep")}
-            title="Deep analysis"
-            description="Adds a few details about the business so recommendations can be specific to it."
-          />
+          {canUseDeep ? (
+            <ModeCard
+              id="mode-deep"
+              icon={Layers}
+              checked={mode === "deep"}
+              onSelect={() => setMode("deep")}
+              title="Deep analysis"
+              description="Add a few business details so recommendations fit your business."
+            />
+          ) : (
+            <div className="flex flex-col gap-3 rounded-xl p-4 ring-1 ring-hairline">
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <Layers className="size-4" aria-hidden />
+                  Deep analysis
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-surface-card px-2 py-0.5 font-mono text-[11px] text-body">
+                  <Lock className="size-3" aria-hidden />
+                  Premium
+                </span>
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">
+                Business context makes every recommendation specific to you.
+              </p>
+              <GoPremiumButton label="Unlock" className="h-9 w-fit px-3 text-xs" />
+            </div>
+          )}
         </div>
       </fieldset>
-      ) : (
-        <p className="text-sm leading-6 text-body">
-          Every technical and on-page check runs on {planLabel ? `${planLabel}` : "your plan"}.
-          Deep analysis adds business context so recommendations are specific to you —{" "}
-          <Link
-            href="/pricing"
-            className="text-brand-accent underline underline-offset-4 hover:text-ink"
-          >
-            see plans
-          </Link>
-          .
-        </p>
-      )}
 
       {canUseDeep && mode === "deep" ? (
-        <div className="grid gap-4 rounded-lg bg-canvas p-4 ring-1 ring-hairline sm:grid-cols-2">
+        <div className="grid gap-4 rounded-xl bg-canvas p-4 ring-1 ring-hairline sm:grid-cols-2">
           {DEEP_FIELDS.map((entry) => (
             <label key={entry.key} className="flex flex-col gap-2">
               <span className="text-sm font-medium text-ink">{entry.label}</span>
@@ -171,51 +213,37 @@ export function UrlIntakeForm({
         </div>
       ) : null}
 
-      {error ? (
-        <div className="flex flex-col gap-2">
-          <p id="project-url-error" role="alert" className="text-sm text-ink">
-            {error}
-          </p>
-          <div className="flex flex-wrap items-center gap-4">
-            {existingId ? (
-              <Link
-                href={`/projects/${existingId}`}
-                className="text-sm underline underline-offset-4 hover:text-ink"
-              >
-                Open your project
-              </Link>
-            ) : null}
-            {upgrade ? (
-              <Link
-                href="/pricing"
-                className="inline-flex h-10 items-center rounded-md bg-primary px-4 font-mono text-sm text-on-primary transition-colors hover:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                Go premium
-              </Link>
-            ) : null}
-          </div>
-        </div>
-      ) : (
-        <p className="text-sm text-body">
-          We crawl the homepage when the project starts. Your plan sets how many
-          sites and pages you can add.
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-hairline pt-5">
+        <p className="text-sm leading-6 text-body">
+          {maxPages == null
+            ? "The crawl starts as soon as you submit."
+            : maxPages === 1
+              ? "We audit the homepage first. It takes about a minute."
+              : `We audit up to ${maxPages} pages. The homepage is ready first.`}
         </p>
-      )}
-      <Button type="submit" className="h-11 w-fit" disabled={pending}>
-        {pending ? "Starting…" : "Start project"}
-      </Button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-md bg-primary px-5 font-mono text-sm text-primary-foreground transition-colors hover:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
+        >
+          {pending ? "Starting…" : "Start audit"}
+          <ArrowRight className="size-4" aria-hidden />
+        </button>
+      </div>
     </form>
   );
 }
 
 function ModeCard({
   id,
+  icon: Icon,
   checked,
   onSelect,
   title,
   description,
 }: {
   id: string;
+  icon: typeof Zap;
   checked: boolean;
   onSelect: () => void;
   title: string;
@@ -224,22 +252,26 @@ function ModeCard({
   return (
     <label
       htmlFor={id}
-      className={`flex cursor-pointer flex-col gap-1 rounded-lg p-4 ring-1 transition ${
-        checked ? "bg-canvas ring-ring" : "bg-transparent ring-hairline hover:ring-ring/50"
-      }`}
+      className={cn(
+        "flex cursor-pointer flex-col gap-2 rounded-xl p-4 ring-1 transition",
+        checked ? "bg-surface-card ring-primary/60" : "ring-hairline hover:bg-surface-card/50",
+      )}
     >
-      <span className="flex items-center gap-2">
+      <span className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-medium text-ink">
+          <Icon className={cn("size-4", checked ? "text-primary" : "text-muted-foreground")} aria-hidden />
+          {title}
+        </span>
         <input
           id={id}
           type="radio"
           name="analysis-mode"
           checked={checked}
           onChange={onSelect}
-          className="size-4 accent-current"
+          className="size-4 accent-[#ff6d29]"
         />
-        <span className="text-sm font-medium text-ink">{title}</span>
       </span>
-      <span className="pl-6 text-xs leading-5 text-muted-foreground">{description}</span>
+      <span className="text-xs leading-5 text-muted-foreground">{description}</span>
     </label>
   );
 }

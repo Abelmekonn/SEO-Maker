@@ -52,6 +52,16 @@ export async function getCrawlHistory(projectId: string, take = 10) {
   });
 }
 
+/** Crawl runs across every project the user owns, newest first, for the workspace history. */
+export async function getRecentCrawlsForUser(userId: string, take = 12) {
+  return prisma.crawl.findMany({
+    where: { project: { userId } },
+    orderBy: { startedAt: "desc" },
+    take,
+    include: { project: { select: { id: true, name: true, rootUrl: true } } },
+  });
+}
+
 /**
  * Projects for the dashboard list, each with only its latest crawl's pages.
  *

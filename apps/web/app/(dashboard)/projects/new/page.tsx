@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
-import { UrlIntakeForm } from "@/components/project/UrlIntakeForm";
-import { PageHeader, Panel } from "@/components/dashboard/shell";
+import { NewProjectView } from "@/components/dashboard/NewProjectView";
 import { getAccountForUser } from "@/lib/plan";
-import { requireUserId } from "@/lib/projects";
+import { listProjectsForUser, requireUserId } from "@/lib/projects";
 
 export default async function NewProjectPage({
   searchParams,
@@ -15,19 +14,17 @@ export default async function NewProjectPage({
   }
 
   const { url } = await searchParams;
-  const account = await getAccountForUser(userId);
+  const [account, projects] = await Promise.all([
+    getAccountForUser(userId),
+    listProjectsForUser(userId),
+  ]);
 
   return (
-    <Panel>
-      <PageHeader
-        title="Start with a URL"
-        description="The first pass is the homepage. You add more pages when that pass is useful."
-      />
-      <UrlIntakeForm
-        initialUrl={url ?? ""}
-        canUseDeep={account.limits.deepMode}
-        planLabel={account.limits.label}
-      />
-    </Panel>
+    <NewProjectView
+      plan={account.plan}
+      limits={account.limits}
+      projects={projects.map((project) => ({ id: project.id, name: project.name }))}
+      url={url}
+    />
   );
 }
