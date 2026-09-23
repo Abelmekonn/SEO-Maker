@@ -7,6 +7,7 @@ import {
   MAX_STORED_SCHEMA_BYTES,
   NON_CONTENT_SELECTOR,
   type PageEvidence,
+  type PageStructure,
   type SchemaEvidence,
   countWords,
   normalizeContent,
@@ -92,6 +93,11 @@ export function extractPage($: CheerioApi, loadedUrl: string): ExtractedPage {
   const openGraph = extractMetaPrefix($, "og:");
   const twitter = extractMetaPrefix($, "twitter:");
 
+  // Structure has to be read before the removal below too: <noscript> is in
+  // NON_CONTENT_SELECTOR, so counting its text afterwards would always be zero.
+  const htmlLength = ($.html() ?? "").length;
+  const structure = extractStructure($, headings);
+
   // Read text last: this mutates the document by removing script/style, and
   // every field above must be taken from the intact page. Heading text in
   // particular: an <h1> holding only an inline SVG logo carries its accessible
@@ -99,6 +105,8 @@ export function extractPage($: CheerioApi, loadedUrl: string): ExtractedPage {
   // page as having no H1 at all.
   $(NON_CONTENT_SELECTOR).remove();
   const content = normalizeContent($("body").text());
+
+  structure.textToHtmlRatio = htmlLength > 0 ? content.length / htmlLength : 0;
 
   const schemaTypes = [...new Set(schema.flatMap((block) => block.types))];
 
@@ -128,8 +136,59 @@ export function extractPage($: CheerioApi, loadedUrl: string): ExtractedPage {
       openGraph,
       twitter,
       redirectChain: [],
+      structure,
     },
   };
+}
+
+/**
+ * Structural observations for the GEO extractability measurement.
+ *
+ * Everything here is an observation about what this crawl received. None of it
+ * is a judgement, and in particular `textToHtmlRatio` must never be reported as
+ * a claim about whether any system can read JavaScript — only as how much
+ * server-rendered text arrived.
+ *
+ * Must be called before NON_CONTENT_SELECTOR is removed.
+ */
+function extractStructure($: CheerioApi, headings: PageEvidence["headings"]): PageStructure {
+  let collapsedRegions = 0;
+  // Only count a collapsed container that actually hides prose. A closed
+  // <details> holding three words is a UI detail, not buried content.
+  for (const node of $(
+    "details:not([open]), [aria-expanded='false'], [role='tabpanel'], [hidden]",
+  ).toArray()) {
+    if (clean($(node).text()).length > 40) {
+      collapsedRegions += 1;
+    }
+  }
+
+  const noscriptChars = $("noscript")
+    .toArray()
+    .reduce((total, node) => total + clean($(node).text()).length, 0);
+
+  const questionHeadings = headings.filter((heading) => isQuestion(heading.text)).length;
+
+  return {
+    hasMain: $("main, [role='main']").length > 0,
+    hasArticle: $("article").length > 0,
+    hasHeader: $("header, [role='banner']").length > 0,
+    hasNav: $("nav, [role='navigation']").length > 0,
+    hasFooter: $("footer, [role='contentinfo']").length > 0,
+    hasAside: $("aside, [role='complementary']").length > 0,
+    collapsedRegions,
+    noscriptChars,
+    // Filled in by the caller once the content has been read.
+    textToHtmlRatio: 0,
+    definitionLists: $("dl").length,
+    questionHeadings,
+  };
+}
+
+/** A heading shaped like a question, with or without the question mark. */
+function isQuestion(text: string): boolean {
+  if (text.trim().endsWith("?")) return true;
+  return /^(how|what|why|when|where|who|which|can|do|does|is|are|should|will)\b/i.test(text.trim());
 }
 
 function extractLinks($: CheerioApi, base: string, originHost: string) {

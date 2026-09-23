@@ -17,17 +17,17 @@ model Account {
 }
 
 model Project {
-  id          String       @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
   rootUrl     String
   name        String
-  maxPages    Int          @default(1)
-  status      String       @default("pending")
-  perfStatus  String       @default("idle")
+  maxPages    Int       @default(1)
+  status      String    @default("pending")
+  perfStatus  String    @default("idle")
   perfError   String?
   perfRunAt   DateTime?
-  perfDone    Int          @default(0)
-  perfTotal   Int          @default(0)
+  perfDone    Int       @default(0)
+  perfTotal   Int       @default(0)
   perfPageIds Json?
 
   // Competitor discovery progress. Mirrors the perf* columns above so the UI can
@@ -63,6 +63,24 @@ model Project {
   /// The crawl whose pages the dashboard shows. Older crawls are kept for history.
   latestCrawlId String?
 
+  // GEO / AI Search Readiness progress. Same shape as the perf* and comp*
+  // blocks so the UI polls the project row rather than a separate run table.
+  geoStatus        String    @default("idle")
+  geoPhase         String?
+  geoError         String?
+  geoRunAt         DateTime?
+  geoDone          Int       @default(0)
+  geoTotal         Int       @default(0)
+  geoAiUsed        Boolean   @default(false)
+  geoLatestAuditId String?
+
+  /// AI visibility tracking: not_configured | configured | running | error.
+  ///
+  /// The only column the AI visibility UI reads. It exists now so that screen
+  /// can be written once and go live later without a migration. Nothing runs
+  /// prompts against assistants yet, and no placeholder rows are ever created.
+  aiVisibilityStatus String @default("not_configured")
+
   createdAt         DateTime          @default(now())
   pages             Page[]
   crawls            Crawl[]
@@ -71,6 +89,14 @@ model Project {
   contentGaps       ContentGap[]
   opportunities     Opportunity[]
   aiResults         AiResult[]
+
+  geoAudits        GeoAudit[]
+  geoProfiles      AiBusinessProfile[]
+  geoEntities      AiEntity[]
+  geoRelations     AiEntityRelationship[]
+  geoAnswers       AiAnswerOpportunity[]
+  geoCitations     AiCitationOpportunity[]
+  geoOpportunities GeoOpportunity[]
 
   @@index([userId])
 }
@@ -106,8 +132,15 @@ model Crawl {
   // Site-wide audits, stored per crawl so a comparison matches like with like.
   robotsAudit  Json?
   sitemapAudit Json?
+  /// Raw robots.txt, capped at 100 KB.
+  ///
+  /// `robotsAudit` only holds the directives that apply to OUR crawler token.
+  /// The GEO layer has to evaluate the groups for OAI-SearchBot, GPTBot and the
+  /// rest, and keeping the text the crawler already fetched lets it do that
+  /// with zero extra HTTP requests.
+  robotsTxt    String?
   /// Seed plan summary: sections covered, deferred/duplicate/off-site counts.
-  seedPlan Json?
+  seedPlan     Json?
 
   // Scores snapshotted at completion, so a comparison never has to re-derive
   // them from pages that may since have been pruned.
@@ -119,8 +152,9 @@ model Crawl {
   startedAt  DateTime  @default(now())
   finishedAt DateTime?
 
-  pages  Page[]
-  issues PageIssue[]
+  pages     Page[]
+  issues    PageIssue[]
+  geoAudits GeoAudit[]
 
   @@index([projectId, startedAt])
 }
@@ -131,8 +165,8 @@ model Page {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// Null only for the seed row created before the first crawl starts.
-  crawlId String?
-  crawl   Crawl?  @relation(fields: [crawlId], references: [id], onDelete: Cascade)
+  crawlId   String?
+  crawl     Crawl?  @relation(fields: [crawlId], references: [id], onDelete: Cascade)
 
   url           String
   finalUrl      String?
@@ -165,7 +199,7 @@ model Page {
 
   /// Whether the site's own sitemap lists this URL. Null when there is no sitemap.
   /// This is what lets the product tell deliberate noindex from a contradiction.
-  inSitemap Boolean?
+  inSitemap        Boolean?
   /// Whether robots.txt disallows this path for our crawler.
   robotsDisallowed Boolean?
 
@@ -197,6 +231,9 @@ model Page {
   performance   PerformanceAudit[]
   issues        PageIssue[]
   aiResults     AiResult[]
+
+  geoAnswerMatches   AiAnswerOpportunity[]
+  geoCitationSignals AiCitationOpportunity[]
 
   @@index([projectId])
   @@index([crawlId])
@@ -249,7 +286,7 @@ model AiResult {
   promptVersion    String
   knowledgeVersion String?
   /// Hash of the evidence and context that produced this, for cache reuse.
-  inputHash String
+  inputHash        String
 
   output Json?
   status String  @default("ok")
@@ -586,11 +623,11 @@ model KnowledgeItem {
   /// False when the source document was not read in the pass that produced the
   /// item. Such items carry no quote and no location, and retrieval prefers a
   /// verified item when both cover the same ground.
-  verified     Boolean
+  verified      Boolean
   sourceSupport String
 
-  status       String
-  supersededBy String?
+  status            String
+  supersededBy      String?
   /// Ids in KnowledgePolicy that override this item's phrasing.
   governingPolicies String[]
 
@@ -613,13 +650,13 @@ model KnowledgeItem {
 /// Every disagreement found during extraction is decided rather than left open,
 /// so the model never has to arbitrate between two sources at generation time.
 model KnowledgePolicy {
-  id        String @id
-  question  String
-  decision  String
-  rationale String
-  directive String
+  id          String  @id
+  question    String
+  decision    String
+  rationale   String
+  directive   String
   /// Phrasings the model must never emit.
-  neverSay Json
+  neverSay    Json
   /// The rejected position, kept so the model can recognise and contradict it.
   losingClaim String
   caveat      String?
@@ -632,4 +669,327 @@ model KnowledgePolicy {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// GEO / AI Search Visibility
+//
+// The whole cluster follows one rule: the LLM's output is a CLAIM, stored with
+// its own confidence and its evidence URLs. Deterministic code verifies the
+// claim and writes the score. No column here ever holds a model-generated
+// 0-100 number.
+// ---------------------------------------------------------------------------
+
+/// One GEO run. Append-only, like PerformanceAudit and CompetitorAnalysis:
+/// the run is the record, and re-running never overwrites what the user saw.
+///
+/// status: pending | running | completed | partial | failed
+/// `partial` is a real outcome, not a soft failure - at least one dimension was
+/// measured and at least one phase could not run. A provider outage lands here
+/// with the deterministic half of the score fully intact.
+model GeoAudit {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  crawlId   String?
+  crawl     Crawl?  @relation(fields: [crawlId], references: [id], onDelete: SetNull)
+
+  status  String  @default("pending")
+  phase   String?
+  error   String?
+  mode    String  @default("quick")
+  /// crawl | manual | retry
+  trigger String  @default("crawl")
+
+  /// Hash of the selected pages' content hashes plus the ruleset and prompt
+  /// versions. An identical fingerprint with force=false short-circuits the run
+  /// before any model call, which is what keeps a page load from spending
+  /// credits.
+  inputFingerprint String
+  rulesetVersion   String
+
+  aiAvailable Boolean @default(false)
+  aiUsed      Boolean @default(false)
+
+  /// AI Search Readiness, 0-100. Null when nothing could be measured - the UI
+  /// prints a sentence in that case and never a zero.
+  readinessScore Float?
+  readinessBand  String?
+
+  entityClarity         Float?
+  contentExtractability Float?
+  answerCoverage        Float?
+  structuredData        Float?
+  aiCrawlerAccess       Float?
+  citationReadiness     Float?
+  businessInfo          Float?
+
+  /// Weights after redistribution, so a stored score can always be audited.
+  measuredWeights Json?
+  /// [{ dimension, reason }] for every dimension that could not be measured.
+  notMeasured     Json?
+  parts           Json?
+  /// Which dimensions ran on a narrowed deterministic fallback.
+  basis           Json?
+
+  pagesSelected   Int   @default(0)
+  pagesAnalyzed   Int   @default(0)
+  /// Pages excluded for budget, with their importance - visible, not vanished.
+  deferredPages   Json?
+  tokensEstimated Int?
+  aiCalls         Int   @default(0)
+  aiFailures      Int   @default(0)
+
+  /// Per-agent PASS/FAIL/UNKNOWN/NOT_TESTED grid, rendered verbatim.
+  crawlerMatrix     Json?
+  entityFacets      Json?
+  extractability    Json?
+  schemaCensus      Json?
+  businessInfoItems Json?
+  citationSignals   Json?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  profile       AiBusinessProfile?
+  answers       AiAnswerOpportunity[]
+  citations     AiCitationOpportunity[]
+  opportunities GeoOpportunity[]
+
+  @@index([projectId, startedAt])
+  @@index([projectId, status])
+  @@index([projectId, inputFingerprint])
+}
+
+/// The AI's reading of what this business is.
+///
+/// Every field is a CLAIM with the model's own confidence. `verifiedFacets` is
+/// written by deterministic code after checking each claim against the crawl,
+/// and that is what feeds Entity Clarity - not the confidences here.
+model AiBusinessProfile {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  geoAuditId String   @unique
+  geoAudit   GeoAudit @relation(fields: [geoAuditId], references: [id], onDelete: Cascade)
+
+  businessName           String?
+  businessNameConfidence Float?
+  businessType           String?
+  businessTypeConfidence Float?
+  industry               String?
+  industryConfidence     Float?
+  description            String?
+  descriptionConfidence  Float?
+
+  /// none | regional | local. "none" nulls the location facets rather than
+  /// failing a business that genuinely has no location to publish.
+  locationRelevance   String?
+  hasPhysicalPremises Boolean?
+
+  confidence       Float?
+  needsHumanReview Boolean @default(true)
+  groundedIn       Json
+  /// { facet: { raw, slots, evidence[] } }, written by deterministic code.
+  verifiedFacets   Json?
+
+  /// ai | user. A user edit supersedes the reading and is never overwritten.
+  source     String  @default("ai")
+  aiResultId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entities      AiEntity[]
+  relationships AiEntityRelationship[]
+
+  @@index([projectId, createdAt])
+}
+
+/// kind: service | product | audience | location | topic | brand | person
+model AiEntity {
+  id        String            @id @default(cuid())
+  projectId String
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  profileId String
+  profile   AiBusinessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  kind        String
+  name        String
+  /// Lowercased and stemmed. The join key deterministic verification uses.
+  normalized  String
+  description String?
+  /// The model's confidence in this extraction. Never a quality score.
+  confidence  Float
+
+  evidenceUrls   Json
+  /// True when `normalized` was found in a crawled page's title, h1 or headings.
+  verified       Boolean @default(false)
+  verifiedPageId String?
+
+  createdAt DateTime @default(now())
+
+  fromRelationships AiEntityRelationship[] @relation("GeoEntityFrom")
+  toRelationships   AiEntityRelationship[] @relation("GeoEntityTo")
+
+  @@unique([profileId, kind, normalized])
+  @@index([projectId, kind])
+}
+
+/// kind: offers | serves | located-in | about | part-of | audience-of
+model AiEntityRelationship {
+  id        String            @id @default(cuid())
+  projectId String
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  profileId String
+  profile   AiBusinessProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  fromEntityId String
+  fromEntity   AiEntity @relation("GeoEntityFrom", fields: [fromEntityId], references: [id], onDelete: Cascade)
+  toEntityId   String
+  toEntity     AiEntity @relation("GeoEntityTo", fields: [toEntityId], references: [id], onDelete: Cascade)
+
+  kind         String
+  confidence   Float
+  evidenceUrls Json
+
+  createdAt DateTime @default(now())
+
+  @@unique([profileId, fromEntityId, toEntityId, kind])
+  @@index([profileId])
+}
+
+/// A generated question and its DETERMINISTICALLY measured coverage.
+///
+/// coverageStatus: answered | partially_answered | not_found
+/// intent: informational | commercial | transactional | navigational | local
+model AiAnswerOpportunity {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  geoAuditId String
+  geoAudit   GeoAudit @relation(fields: [geoAuditId], references: [id], onDelete: Cascade)
+
+  question        String
+  /// Hash of the normalized question. Stable across runs, and the key a future
+  /// AiPrompt row joins on without a backfill.
+  questionHash    String
+  intent          String
+  topic           String?
+  relatedEntityId String?
+  relatedService  String?
+
+  /// What the model said an answer must contain. Re-running the matcher over
+  /// these reproduces coverageScore exactly, with no model call.
+  answerTerms   Json
+  disqualifiers Json?
+  /// The model's own importance weighting. Ranks the list, never scores it.
+  importance    Float?
+
+  coverageStatus String
+  coverageScore  Float
+  matchedPageId  String?
+  matchedPage    Page?   @relation(fields: [matchedPageId], references: [id], onDelete: SetNull)
+  matchedHeading String?
+  matchedExcerpt String?
+
+  verifiedByAi   Boolean @default(false)
+  missingAspects Json?
+
+  /// Promotable to an AiPrompt when AI visibility tracking ships.
+  promotable Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@unique([geoAuditId, questionHash])
+  @@index([geoAuditId, coverageStatus])
+  @@index([projectId, questionHash])
+}
+
+/// signal: specificity | freshness | attribution | identity | definition | faq |
+///         outbound-source | claim
+/// status: present | weak | absent
+model AiCitationOpportunity {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  geoAuditId String
+  geoAudit   GeoAudit @relation(fields: [geoAuditId], references: [id], onDelete: Cascade)
+  pageId     String?
+  page       Page?    @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  signal   String
+  status   String
+  /// The measured numbers behind the status. Rendered, not hidden.
+  observed Json?
+
+  /// A verbatim claim the page makes. Dropped before insert when it is not a
+  /// literal substring of Page.content, so this column cannot hold an invention.
+  claimText     String?
+  claimKind     String?
+  supportType   String?
+  claimVerified Boolean @default(false)
+  sourceUrl     String?
+
+  recommendation String?
+
+  createdAt DateTime @default(now())
+
+  @@index([geoAuditId, signal])
+  @@index([pageId])
+}
+
+/// A GEO finding.
+///
+/// Separate from `Opportunity` because that model requires a non-null score and
+/// band. A finding such as "OAI-SearchBot access is UNKNOWN because robots.txt
+/// returned 503" has no honest score, and writing 0 would be the
+/// unmeasured-as-zero failure the scoring layer exists to prevent.
+///
+/// type: ENTITY_CLARITY | ENTITY_CONSISTENCY | STRUCTURED_DATA |
+///       AI_CRAWLER_ACCESS | ANSWER_GAP | CONTENT_EXTRACTABILITY |
+///       BUSINESS_INFORMATION | CITATION_READINESS | INTERNAL_LINKING |
+///       SERVICE_COVERAGE | LOCATION_COVERAGE
+/// severity: critical | high | medium | low
+/// effort: low | medium | high
+/// status: open | in-progress | done | dismissed
+model GeoOpportunity {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  geoAuditId String
+  geoAudit   GeoAudit @relation(fields: [geoAuditId], references: [id], onDelete: Cascade)
+
+  type              String
+  title             String
+  explanation       String
+  recommendedAction String
+
+  severity        String
+  /// AI Search Opportunity, 0-100. Deterministic; the LLM never sets it.
+  priority        Float
+  priorityBand    String
+  /// The inputs behind `priority`, so it is always auditable.
+  priorityParts   Json?
+  estimatedEffort String
+
+  /// The readiness dimension this finding would move.
+  dimension String?
+
+  affectedPageIds Json
+  affectedUrls    Json
+  /// [{ label, value, source }] - every entry traceable to a Page column,
+  /// a PageEvidence field or robots.txt.
+  evidence        Json
+
+  /// True only when the title/explanation/action prose came from the model.
+  aiUsed     Boolean @default(false)
+  aiResultId String?
+
+  status    String   @default("open")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, status, priority])
+  @@index([geoAuditId, type])
 }

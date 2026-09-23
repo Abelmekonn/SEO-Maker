@@ -12,7 +12,8 @@
     "./crawl": "./src/crawl/index.ts",
     "./robots": "./src/robots/index.ts",
     "./sitemap": "./src/sitemap/index.ts",
-    "./page": "./src/page/index.ts"
+    "./page": "./src/page/index.ts",
+    "./geo": "./src/geo/index.ts"
   },
   "scripts": {
     "test": "vitest run",

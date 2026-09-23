@@ -104,10 +104,15 @@ export type PageFailure = {
   status: "failed";
 };
 
+/** Matches the cap documented on `Crawl.robotsTxt`. */
+const ROBOTS_MAX_CHARS = 100_000;
+
 export type CrawlSiteResult = {
   pages: PageAudit[];
   failures: PageFailure[];
   robotsAudit: RobotsAudit;
+  /** Raw robots.txt, so per-agent groups can be evaluated without refetching. */
+  robotsTxt: string | null;
   sitemapAudit: SitemapAudit;
   seedPlan: SeedPlan;
   /** Requests actually spent, which exceeds `pages` when URLs redirect onto each other. */
@@ -460,6 +465,7 @@ export async function crawlSite(
     pages,
     failures,
     robotsAudit,
+    robotsTxt: robots.text,
     sitemapAudit: buildSitemapAudit({
       documents: sitemap.documents,
       urlCount: sitemap.urls.length,
@@ -497,6 +503,14 @@ function classifyError(error: unknown, status: number | null): string {
   return "unknown";
 }
 
+/**
+ * The raw body is kept as well as the parse.
+ *
+ * `buildRobotsAudit` only reports the group that applies to OUR crawler token,
+ * which is all the SEO audit needs. The GEO layer has to evaluate the groups
+ * for OAI-SearchBot, GPTBot and the rest, and keeping the text we already
+ * fetched lets it do that without a second request.
+ */
 async function readRobots(origin: string) {
   const url = `${origin}/robots.txt`;
   try {
@@ -507,11 +521,16 @@ async function readRobots(origin: string) {
       headers: { "user-agent": USER_AGENT },
     });
     if (response.status >= 400) {
-      return { url, status: response.status, parsed: null };
+      return { url, status: response.status, parsed: null, text: null as string | null };
     }
-    return { url, status: response.status, parsed: parseRobotsTxt(response.body) };
+    return {
+      url,
+      status: response.status,
+      parsed: parseRobotsTxt(response.body),
+      text: response.body.slice(0, ROBOTS_MAX_CHARS),
+    };
   } catch {
-    return { url, status: null as number | null, parsed: null };
+    return { url, status: null as number | null, parsed: null, text: null as string | null };
   }
 }
 

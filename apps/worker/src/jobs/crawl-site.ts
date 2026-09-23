@@ -73,6 +73,7 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
         skipped: result.skipped,
         requests: result.requests,
         robotsAudit: result.robotsAudit as unknown as Prisma.InputJsonValue,
+        robotsTxt: result.robotsTxt,
         sitemapAudit: result.sitemapAudit as unknown as Prisma.InputJsonValue,
         seedPlan: {
           sections: result.seedPlan.sections,

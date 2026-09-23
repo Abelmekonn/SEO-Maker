@@ -10,6 +10,11 @@ if (process.env.NODE_ENV !== "production") {
 
 export { Prisma, PrismaClient } from "@prisma/client";
 export type {
+  AiAnswerOpportunity,
+  AiBusinessProfile,
+  AiCitationOpportunity,
+  AiEntity,
+  AiEntityRelationship,
   AiResult,
   Competitor,
   CompetitorAnalysis,
@@ -17,6 +22,8 @@ export type {
   CompetitorQuery,
   ContentGap,
   Crawl,
+  GeoAudit,
+  GeoOpportunity,
   KnowledgeItem,
   KnowledgePolicy,
   Opportunity,
@@ -41,3 +48,11 @@ export {
   writeCompetitorPhase,
   type CompetitorProgress,
 } from "./competitor-progress";
+export {
+  incrementGeoDone,
+  readGeoProgress,
+  resetGeoProgress,
+  setGeoStatus,
+  writeGeoPhase,
+  type GeoProgress,
+} from "./geo-progress";

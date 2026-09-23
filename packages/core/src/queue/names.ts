@@ -124,3 +124,49 @@ export type AiCompetitorInsightJob = {
   mode: "quick" | "deep";
   force?: boolean;
 };
+
+/**
+ * GEO gets its own queue rather than sharing `ai-site`.
+ *
+ * `ai-site` serves a suggestion someone is waiting on: short lock, concurrency
+ * 2. A GEO audit is a multi-minute batch over the whole crawl. Sharing would
+ * park an interactive request behind a four-minute run.
+ */
+export const GEO_QUEUE = "geo-analysis";
+export const GEO_AUDIT_JOB = "geo-audit";
+
+export type GeoAuditJob = {
+  projectId: string;
+  /** The crawl whose pages are analyzed. Defaults to the project's latest. */
+  crawlId?: string;
+  mode: "quick" | "deep";
+  /** Skip the unchanged-content short-circuit and re-run regardless. */
+  force?: boolean;
+  trigger: "crawl" | "manual" | "retry";
+};
+
+export const GEO_PHASES = [
+  "select",
+  "understand",
+  "entities",
+  "crawler",
+  "structure",
+  "answers",
+  "citations",
+  "score",
+  "opportunities",
+] as const;
+
+export type GeoPhase = (typeof GEO_PHASES)[number];
+
+export const GEO_PHASE_LABELS: Record<GeoPhase, string> = {
+  select: "Selecting the pages to analyze",
+  understand: "Reading what this business is",
+  entities: "Checking entity clarity",
+  crawler: "Checking AI crawler accessibility",
+  structure: "Measuring content extractability",
+  answers: "Generating questions and measuring coverage",
+  citations: "Measuring citation readiness",
+  score: "Calculating AI Search Readiness",
+  opportunities: "Building AI search opportunities",
+};

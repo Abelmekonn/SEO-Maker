@@ -71,6 +71,32 @@ export type RedirectHop = {
   status: number;
 };
 
+/**
+ * Structural observations used by the GEO layer's extractability measurement.
+ *
+ * Every field is an observation about what the crawler received, never a
+ * judgement. `textToHtmlRatio` in particular is reported as "how much
+ * server-rendered text arrived", and must never be phrased as a claim about
+ * whether any system can or cannot read JavaScript.
+ */
+export type PageStructure = {
+  hasMain: boolean;
+  hasArticle: boolean;
+  hasHeader: boolean;
+  hasNav: boolean;
+  hasFooter: boolean;
+  hasAside: boolean;
+  /** `<details>`, tab panels, `aria-expanded="false"` and `hidden` holding real text. */
+  collapsedRegions: number;
+  /** Characters of text reachable only inside `<noscript>`. */
+  noscriptChars: number;
+  /** Rendered text length over raw HTML bytes. Low means little arrived server-side. */
+  textToHtmlRatio: number;
+  definitionLists: number;
+  /** Headings shaped like a question. */
+  questionHeadings: number;
+};
+
 export type PageEvidence = {
   headings: HeadingEvidence[];
   links: LinkEvidence[];
@@ -79,6 +105,12 @@ export type PageEvidence = {
   openGraph: Record<string, string>;
   twitter: Record<string, string>;
   redirectChain: RedirectHop[];
+  /**
+   * Optional on purpose: pages crawled before this field existed have no
+   * structure, and the GEO layer must report those dimensions as "not measured"
+   * rather than scoring an old crawl as if it had failed the checks.
+   */
+  structure?: PageStructure;
 };
 
 /**
@@ -140,6 +172,11 @@ export function readEvidence(value: unknown): PageEvidence {
     openGraph: raw.openGraph && typeof raw.openGraph === "object" ? raw.openGraph : {},
     twitter: raw.twitter && typeof raw.twitter === "object" ? raw.twitter : {},
     redirectChain: Array.isArray(raw.redirectChain) ? raw.redirectChain : [],
+    // Left undefined rather than defaulted: "this crawl predates structure
+    // capture" and "this page has no landmarks" are different facts, and only
+    // the second one is a finding.
+    structure:
+      raw.structure && typeof raw.structure === "object" ? raw.structure : undefined,
   };
 }
 
