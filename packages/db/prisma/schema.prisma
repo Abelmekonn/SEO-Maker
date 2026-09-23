@@ -60,6 +60,11 @@ model Project {
   targetKeywords      Json?
   contextUpdatedAt    DateTime?
 
+  /// Page types the user set by URL path, e.g. {"/payments": "product"}.
+  /// The crawler applies them over its own classification, so a correction
+  /// survives re-crawls, and they unblock AI fixes that need a known type.
+  pageTypeOverrides Json?
+
   /// The crawl whose pages the dashboard shows. Older crawls are kept for history.
   latestCrawlId String?
 

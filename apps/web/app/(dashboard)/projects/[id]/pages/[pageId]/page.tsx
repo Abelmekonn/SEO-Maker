@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/dashboard/shell";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { fixPlanInputFromPage, planFixes } from "@seo-maker/core/page";
 import { prisma } from "@seo-maker/db";
+import { AiQueueStatus } from "@/components/project/AiQueueStatus";
 import { AiRecommendations } from "@/components/project/AiRecommendations";
 import { PageChecks } from "@/components/project/PageChecks";
 import { PageEvidencePanel } from "@/components/project/PageEvidence";
@@ -113,8 +114,12 @@ export default async function ProjectPageDetailPage({
         aiEnabled={aiConfigured()}
         planAllowsAi={account.limits.ai}
         planLabel={account.limits.label}
+        status={<AiQueueStatus projectId={id} pageId={page.id} />}
       >
         <PageFixes
+          projectId={id}
+          pageId={page.id}
+          pageType={page.pageType}
           plan={plan}
           issues={page.issues}
           recommendation={recommendation?.data ?? null}

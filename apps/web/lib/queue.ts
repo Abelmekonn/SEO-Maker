@@ -142,3 +142,44 @@ export async function enqueueCompetitorInsights(data: CompetitorInsightsJob) {
     removeOnFail: 20,
   });
 }
+
+export type AiQueueJob = {
+  jobId: string;
+  pageId: string;
+  state: "active" | "waiting";
+  features: string[] | null;
+  /** 1-based place in the whole AI queue, across projects. Active jobs are 0. */
+  position: number;
+};
+
+/**
+ * This project's AI jobs that have not finished, in the order the worker will
+ * take them. The queue is shared across projects, so a job's position counts
+ * everyone's waiting work ahead of it: that is the honest wait.
+ */
+export async function getAiQueueJobs(projectId: string): Promise<AiQueueJob[]> {
+  const queue = getAiPageQueue();
+  const [active, waiting] = await Promise.all([
+    queue.getJobs(["active"]),
+    queue.getJobs(["waiting", "prioritized", "delayed"], 0, 999, true),
+  ]);
+
+  const jobs: AiQueueJob[] = [];
+  for (const job of active) {
+    if (job?.data?.projectId === projectId) {
+      jobs.push({ jobId: String(job.id), pageId: job.data.pageId, state: "active", features: job.data.features ?? null, position: 0 });
+    }
+  }
+  waiting.forEach((job, index) => {
+    if (job?.data?.projectId === projectId) {
+      jobs.push({
+        jobId: String(job.id),
+        pageId: job.data.pageId,
+        state: "waiting",
+        features: job.data.features ?? null,
+        position: index + 1,
+      });
+    }
+  });
+  return jobs;
+}

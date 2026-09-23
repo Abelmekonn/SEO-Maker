@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Sparkles } from "lucide-react";
-import type { PageAiResult } from "@/lib/ai-results";
+import { type PageAiResult, friendlyAiError } from "@/lib/ai-results";
 import { AnalyzeButton } from "@/components/project/AnalyzeButton";
 import { UpgradePrompt } from "@/components/project/UpgradePrompt";
 
@@ -24,6 +24,7 @@ export function AiRecommendations({
   aiEnabled,
   planAllowsAi = true,
   planLabel,
+  status,
   children,
 }: {
   result: PageAiResult | null;
@@ -35,6 +36,8 @@ export function AiRecommendations({
   planLabel?: string;
   /** The per-check fixes, rendered under the summary whether or not AI has run. */
   children?: ReactNode;
+  /** Live queue progress, shown under the header. */
+  status?: ReactNode;
 }) {
   const disabledReason = aiEnabled
     ? undefined
@@ -83,6 +86,7 @@ export function AiRecommendations({
         />
       ) : (
         <>
+          {status}
           {!result ? (
             <Empty>
               The AI has not explained this page yet. Fixes taken from the crawl are below already;
@@ -90,20 +94,15 @@ export function AiRecommendations({
             </Empty>
           ) : result.status !== "ok" || !result.data ? (
             <div className="flex flex-col gap-2 rounded-lg bg-surface-soft p-6 ring-1 ring-hairline">
-              <p className="text-sm font-medium text-ink">
-                {result.status === "invalid"
-                  ? "The model returned output that did not match the contract."
-                  : "The last analysis did not finish."}
-              </p>
+              <p className="text-sm font-medium text-ink">{friendlyAiError(result.error)}</p>
               <p className="text-sm leading-6 text-body">
-                {result.status === "invalid"
-                  ? "It was rejected rather than stored, so nothing unverified reached this page. Try again."
-                  : "Nothing was stored. You can queue it again."}
+                Nothing unverified was stored. The fixes taken from the crawl below still apply.
               </p>
               {result.error ? (
-                <p className="mt-1 break-words font-mono text-xs leading-5 text-muted-foreground">
-                  {result.error}
-                </p>
+                <details className="mt-1 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer hover:text-body">Technical detail</summary>
+                  <p className="mt-1 break-words font-mono text-[11px] leading-5">{result.error}</p>
+                </details>
               ) : null}
             </div>
           ) : (

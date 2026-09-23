@@ -171,3 +171,36 @@ export async function getPageFeatureResults(pageId: string): Promise<Map<string,
 export function aiConfigured(): boolean {
   return Boolean(process.env.AI_API_KEY?.trim());
 }
+
+/**
+ * A stored AI error in words a user can act on.
+ *
+ * AiResult.error holds "kind | message | provider body" for debugging. The
+ * provider body is JSON and the kinds are internal, so the UI shows this
+ * instead, and keeps the raw text behind a disclosure for support.
+ */
+export function friendlyAiError(error: string | null): string {
+  const text = error ?? "";
+  const kind = text.split("|")[0]?.trim();
+  if (kind === "rate-limited") {
+    return /per day|TPD|RPD/i.test(text)
+      ? "The AI provider's daily limit for this key is used up. It resets within 24 hours; run it again then."
+      : "The AI provider's per-minute limit was reached while other pages were running. Run it again in a minute.";
+  }
+  if (kind === "auth") {
+    return /network|region|VPN/i.test(text)
+      ? "The AI provider refused this network (region or VPN), not the key."
+      : "The AI provider rejected the API key. Check AI_API_KEY and restart the worker.";
+  }
+  if (kind === "timeout") return "The AI provider took too long to answer. Run it again.";
+  if (kind === "invalid-output") {
+    return /grounding check/i.test(text)
+      ? "The answer failed a grounding check (it referred to something the crawl did not find), so it was not stored."
+      : "The model's answer did not match the expected format and was not stored. Run it again.";
+  }
+  if (kind === "not-configured") return "No AI provider is configured. Set AI_API_KEY and restart the worker.";
+  if (/model_not_found|does not exist/i.test(text)) {
+    return "The configured AI model is not available to this key. Change AI_MODEL.";
+  }
+  return "The AI call did not finish. Run it again.";
+}

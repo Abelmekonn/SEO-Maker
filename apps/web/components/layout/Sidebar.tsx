@@ -61,7 +61,7 @@ export function Sidebar({ plan }: { plan: PlanId }) {
   const secondaryItems = projectBase
     ? [
         { href: `${projectBase}/tools`, label: "Tools", icon: Wrench, exact: false, premium: true },
-        { href: `${projectBase}/suggestions`, label: "AI Suggestions", icon: Sparkles, exact: false, premium: true },
+        { href: `${projectBase}/suggestions`, label: "AI workspace", icon: Sparkles, exact: false, premium: true },
         { href: `${projectBase}/reports`, label: "Reports", icon: ClipboardList, exact: false, premium: true },
         { href: `${projectBase}/settings`, label: "Settings", icon: Settings, exact: false },
       ]

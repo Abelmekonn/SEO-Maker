@@ -12,7 +12,8 @@ import type {
 import type { PlannedFix } from "@seo-maker/core/page";
 import { CircleAlert, FileSearch, Sparkles, TriangleAlert, Wrench } from "lucide-react";
 import { CopyButton } from "@/components/project/CopyButton";
-import type { FeatureResult } from "@/lib/ai-results";
+import { PageTypeControl } from "@/components/project/PageTypeControl";
+import { type FeatureResult, friendlyAiError } from "@/lib/ai-results";
 import { checks } from "@/lib/page-audit";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +43,13 @@ export function PageFixes({
   issues,
   recommendation,
   features,
+  projectId,
+  pageId,
+  pageType,
 }: {
+  projectId: string;
+  pageId: string;
+  pageType: string | null;
   plan: PlannedFix[];
   issues: Issue[];
   recommendation: PageRecommendation | null;
@@ -137,10 +144,22 @@ export function PageFixes({
               {fix.strategy === "deterministic" ? (
                 <Deterministic fix={fix} />
               ) : fix.strategy === "blocked" ? (
-                <p className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2.5 text-sm leading-6 text-warn">
-                  <FileSearch className="mt-1 size-3.5 shrink-0" aria-hidden />
-                  {fix.reason}
-                </p>
+                <div className="flex flex-col gap-3">
+                  <p className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2.5 text-sm leading-6 text-warn">
+                    <FileSearch className="mt-1 size-3.5 shrink-0" aria-hidden />
+                    {fix.reason}
+                  </p>
+                  {fix.checkId === "schema" ? (
+                    // The one blocker the user can clear themselves: say what
+                    // the page is, and the schema fix becomes possible.
+                    <PageTypeControl
+                      projectId={projectId}
+                      pageId={pageId}
+                      current={pageType}
+                      prompt="Tell us what this page is and the structured data can be written."
+                    />
+                  ) : null}
+                </div>
               ) : (
                 <Generated fix={fix} result={result} />
               )}
@@ -210,13 +229,14 @@ function Generated({ fix, result }: { fix: PlannedFix; result: FeatureResult | u
   }
   if (!result.data) {
     return (
-      <div className="flex flex-col gap-1">
-        <p className="text-sm text-ink">
-          {result.status === "invalid"
-            ? "The suggestion failed a grounding check and was not stored."
-            : "The last generation did not finish."}
-        </p>
-        {result.error ? <p className="break-words font-mono text-[11px] leading-5 text-muted-foreground">{result.error}</p> : null}
+      <div className="flex flex-col gap-1.5">
+        <p className="text-sm text-ink">{friendlyAiError(result.error)}</p>
+        {result.error ? (
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer hover:text-body">Technical detail</summary>
+            <p className="mt-1 break-words font-mono text-[11px] leading-5">{result.error}</p>
+          </details>
+        ) : null}
       </div>
     );
   }

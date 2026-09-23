@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AI_QUEUED_EVENT } from "@/components/project/AiQueueStatus";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,6 +23,7 @@ export function AnalyzeButton({
   disabledReason,
   force = false,
   features,
+  next,
 }: {
   projectId: string;
   pageId?: string;
@@ -31,6 +33,8 @@ export function AnalyzeButton({
   force?: boolean;
   /** Narrow the run to these features (Phase 2), e.g. ["title", "meta"]. */
   features?: string[];
+  /** Queue the N worst pages not analysed yet, instead of one page or all. */
+  next?: number;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -45,12 +49,13 @@ export function AnalyzeButton({
     const response = await fetch(`/api/projects/${projectId}/analyze`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pageId, force, features }),
+      body: JSON.stringify({ pageId, force, features, next }),
     });
     const data = (await response.json().catch(() => null)) as {
       error?: string;
       queued?: number;
       message?: string;
+      etaMinutes?: number;
     } | null;
 
     setPending(false);
@@ -66,10 +71,13 @@ export function AnalyzeButton({
     }
 
     setNote(
-      data.queued === 1
-        ? "Queued. Refresh in a moment to see the result."
-        : `Queued ${data.queued} pages. Refresh in a moment.`,
+      data.message ??
+        (data.queued === 1
+          ? `Queued. About ${data.etaMinutes ?? 1} min on the current AI tier.`
+          : `Queued ${data.queued} pages. About ${data.etaMinutes ?? data.queued} min on the current AI tier.`),
     );
+    // Starts the live progress panel instead of asking for a manual refresh.
+    window.dispatchEvent(new Event(AI_QUEUED_EVENT));
     router.refresh();
   }
 
