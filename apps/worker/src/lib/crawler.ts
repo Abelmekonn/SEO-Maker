@@ -6,7 +6,13 @@ import {
   pathDepth,
   planSeeds,
 } from "@seo-maker/core/crawl";
-import { type PageEvidence, classifyPage, contentFingerprint } from "@seo-maker/core/page";
+import {
+  type ClassifyInput,
+  type PageEvidence,
+  classifyPage,
+  contentFingerprint,
+  inferSearchIntent,
+} from "@seo-maker/core/page";
 import {
   type RobotsAudit,
   buildRobotsAudit,
@@ -79,6 +85,8 @@ export type PageAudit = {
   robotsDisallowed: boolean;
   pageType: string;
   pageTypeScore: number;
+  searchIntent: string | null;
+  searchIntentScore: number | null;
   language: string | null;
   depth: number;
   discoveredVia: DiscoveredVia;
@@ -119,6 +127,8 @@ export type CrawlSiteResult = {
 export type CrawlHooks = {
   onPage?: (audit: PageAudit) => Promise<void>;
   onFailure?: (failure: PageFailure) => Promise<void>;
+  /** Business context that sharpens page classification (Deep mode). */
+  classify?: Pick<ClassifyInput, "offerings" | "offeringKind">;
 };
 
 export async function crawlSite(
@@ -299,6 +309,13 @@ export async function crawlSite(
           h1: extracted.h1,
           schemaTypes: extracted.schemaTypes,
           wordCount: extracted.wordCount,
+          offerings: hooks?.classify?.offerings,
+          offeringKind: hooks?.classify?.offeringKind,
+        });
+        const intent = inferSearchIntent({
+          pageType: classification.type,
+          title: extracted.title,
+          h1: extracted.h1,
         });
 
         const via = discovery.get(requestedUrl) ?? discovery.get(loadedUrl) ?? "link";
@@ -340,6 +357,8 @@ export async function crawlSite(
           robotsDisallowed: isPathDisallowed(loaded.pathname, group),
           pageType: classification.type,
           pageTypeScore: classification.confidence,
+          searchIntent: intent.intent,
+          searchIntentScore: intent.intent ? intent.confidence : null,
           language: extracted.language,
           depth: pathDepth(loadedUrl),
           discoveredVia: via,

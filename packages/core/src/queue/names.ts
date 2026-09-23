@@ -94,9 +94,11 @@ export const AI_PAGE_FEATURES = [
   "page-recommendation",
   "title",
   "meta",
+  "heading",
   "content",
   "schema",
   "internal-link",
+  "image-alt",
 ] as const;
 
 export type AiPageFeature = (typeof AI_PAGE_FEATURES)[number];

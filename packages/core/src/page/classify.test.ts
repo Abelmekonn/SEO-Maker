@@ -110,3 +110,37 @@ describe("hasAltEvidence", () => {
     expect(hasAltEvidence(image())).toBe(false);
   });
 });
+
+describe("classifyPage Phase 2.4 signals", () => {
+  it("does not file a pricing page under documentation because it has an FAQ block", () => {
+    const result = classifyPage({ url: "https://stripe.com/pricing", schemaTypes: ["FAQPage"] });
+    expect(result.type).toBe("pricing");
+  });
+
+  it("treats a path named after a listed offering as a product page", () => {
+    const result = classifyPage({
+      url: "https://stripe.com/payments",
+      offerings: ["Payments", "Billing", "Connect"],
+    });
+    expect(result.type).toBe("product");
+    expect(result.evidence.join(" ")).toMatch(/Payments/);
+  });
+
+  it("uses service when the business sells services", () => {
+    const result = classifyPage({
+      url: "https://agency.example/seo-audit",
+      offerings: ["SEO audit"],
+      offeringKind: "service",
+    });
+    expect(result.type).toBe("service");
+  });
+
+  it("ignores offerings nested under another section", () => {
+    const result = classifyPage({ url: "https://stripe.com/legal/payments", offerings: ["Payments"] });
+    expect(result.type).toBe("legal");
+  });
+
+  it("keeps CollectionPage as a weak category signal", () => {
+    expect(classifyPage({ url: "https://x.com/zz", schemaTypes: ["CollectionPage"] }).type).toBe("category");
+  });
+});

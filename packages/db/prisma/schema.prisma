@@ -141,6 +141,10 @@ model Page {
   pageType      String?
   /// 0-1 confidence from the deterministic classifier.
   pageTypeScore Float?
+  /// Phase 2.5: informational | navigational | commercial | transactional.
+  /// Inferred from page type and wording, so it always travels with a confidence.
+  searchIntent      String?
+  searchIntentScore Float?
   title         String?
   metaDesc      String?
   h1            String?

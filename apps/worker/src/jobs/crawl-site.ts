@@ -50,6 +50,7 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
 
   try {
     const result = await crawlSite(url, maxPages, {
+      classify: classifyContext(project),
       onPage: async (audit) => {
         await savePage(projectId, crawl.id, audit);
         saved += 1;
@@ -69,8 +70,9 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
         discovered: result.seedPlan.seeds.length + result.seedPlan.deferred,
         queued: result.seedPlan.seeds.length,
         crawled: result.pages.length,
-        failed: result.failures.length,
-        skipped: result.skipped,
+        // A URL that answers with a PDF or JSON file is not a broken page.
+        failed: result.failures.filter((row) => row.errorType !== NOT_HTML).length,
+        skipped: result.skipped + result.failures.filter((row) => row.errorType === NOT_HTML).length,
         requests: result.requests,
         robotsAudit: result.robotsAudit as unknown as Prisma.InputJsonValue,
         sitemapAudit: result.sitemapAudit as unknown as Prisma.InputJsonValue,
@@ -209,6 +211,8 @@ async function savePage(projectId: string, crawlId: string, audit: PageAudit) {
     robotsDisallowed: audit.robotsDisallowed,
     pageType: audit.pageType,
     pageTypeScore: audit.pageTypeScore,
+    searchIntent: audit.searchIntent,
+    searchIntentScore: audit.searchIntentScore,
     language: audit.language,
     depth: audit.depth,
     discoveredVia: audit.discoveredVia,
@@ -232,6 +236,9 @@ async function savePage(projectId: string, crawlId: string, audit: PageAudit) {
 }
 
 /** A failed fetch becomes a visible row instead of an absent one. */
+/** errorType the crawler gives a URL that served something other than HTML. */
+const NOT_HTML = "not-html";
+
 async function saveFailure(projectId: string, crawlId: string, failure: PageFailure) {
   const data = {
     url: failure.url,
@@ -240,7 +247,11 @@ async function saveFailure(projectId: string, crawlId: string, failure: PageFail
     discoveredVia: failure.discoveredVia,
     errorType: failure.errorType,
     error: failure.error,
-    status: "failed",
+    // A file (stripe.com/apple-app-site-association, a PDF) answering 200 is
+    // not a failed page. Stored as "failed" it went through every HTML check
+    // and reported seven problems a JSON file cannot have. "excluded" keeps it
+    // visible without auditing it.
+    status: failure.errorType === NOT_HTML ? "excluded" : "failed",
   };
 
   const existing = await prisma.page.findFirst({ where: { crawlId, url: failure.url } });
@@ -249,4 +260,28 @@ async function saveFailure(projectId: string, crawlId: string, failure: PageFail
     return;
   }
   await prisma.page.create({ data: { projectId, crawlId, ...data } });
+}
+
+/**
+ * The business's own list of what it sells, for page classification.
+ *
+ * Only Deep projects carry it. A page named after a listed offering is a
+ * product or service page on the user's word, which is stronger evidence than
+ * anything the URL alone can say (Phase 2.4).
+ */
+function classifyContext(project: {
+  analysisMode: string;
+  servicesProducts: unknown;
+  businessType: string | null;
+}): { offerings?: string[]; offeringKind?: "product" | "service" } {
+  if (project.analysisMode !== "deep" || !Array.isArray(project.servicesProducts)) {
+    return {};
+  }
+  const offerings = project.servicesProducts.filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  const offeringKind = /service|agency|consult|clinic|studio|firm|practice/i.test(project.businessType ?? "")
+    ? "service"
+    : "product";
+  return { offerings, offeringKind };
 }

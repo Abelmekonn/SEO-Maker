@@ -31,6 +31,14 @@ export type ClassifyInput = {
   /** Schema.org `@type` values found on the page. */
   schemaTypes?: string[];
   wordCount?: number | null;
+  /**
+   * What the business says it sells (Deep mode's `servicesProducts`). A path
+   * named after one of them is a page about that offering. This is the user's
+   * own statement, so it is evidence rather than inference.
+   */
+  offerings?: string[];
+  /** Whether those offerings are products or services. Defaults to product. */
+  offeringKind?: "product" | "service";
 };
 
 export type Classification = {
@@ -52,8 +60,18 @@ const SCHEMA_TYPE: Record<string, PageType> = {
   techarticle: "documentation",
   aboutpage: "about",
   contactpage: "contact",
+};
+
+/**
+ * Schema.org types that hint at a type but lose to the URL.
+ *
+ * FAQPage used to settle the question as "documentation", which filed
+ * stripe.com/pricing under documentation because the pricing page carries an
+ * FAQ block. An FAQ is a component many page types include, not a page type,
+ * so it no longer classifies anything on its own.
+ */
+const WEAK_SCHEMA_TYPE: Record<string, PageType> = {
   collectionpage: "category",
-  faqpage: "documentation",
 };
 
 /** First-path-segment patterns. Ordered: the first match wins. */
@@ -106,6 +124,21 @@ export function classifyPage(input: ClassifyInput): Classification {
     }
   }
 
+  const offering = matchOffering(pathname, input.offerings ?? []);
+  if (offering) {
+    const type: PageType = input.offeringKind === "service" ? "service" : "product";
+    evidence.push(`URL path matches "${offering}", one of the business's listed offerings`);
+    return { type, confidence: 0.7, evidence };
+  }
+
+  for (const schemaType of schemaTypes) {
+    const mapped = WEAK_SCHEMA_TYPE[schemaType];
+    if (mapped) {
+      evidence.push(`schema.org ${schemaType}`);
+      return { type: mapped, confidence: 0.6, evidence };
+    }
+  }
+
   const heading = `${input.title ?? ""} ${input.h1 ?? ""}`.toLowerCase();
   if (/\bpricing\b|\bplans\b/.test(heading)) {
     evidence.push("Title or H1 mentions pricing");
@@ -117,6 +150,36 @@ export function classifyPage(input: ClassifyInput): Classification {
   }
 
   return { type: "other", confidence: 0.2, evidence: ["No decisive signal"] };
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * The listed offering a path is named after, if any.
+ *
+ * Matches the first path segment against each offering's slug, so
+ * `/payments` and `/payments/checkout` match "Payments" but `/legal/payments`
+ * does not: a page nested under another section belongs to that section.
+ */
+function matchOffering(pathname: string, offerings: string[]): string | null {
+  const first = pathname.split("/").filter(Boolean)[0];
+  if (!first) {
+    return null;
+  }
+  const segment = slugify(decodeURIComponent(first));
+  for (const offering of offerings) {
+    const slug = slugify(offering);
+    if (slug.length >= 3 && (segment === slug || segment === `${slug}s` || `${segment}s` === slug)) {
+      return offering.trim();
+    }
+  }
+  return null;
 }
 
 /**
