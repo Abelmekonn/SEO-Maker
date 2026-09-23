@@ -60,14 +60,21 @@ export function MetricCard({
   label,
   hint,
   denominator,
+  value,
+  tone,
   ring = false,
 }: {
   icon: typeof Eye;
   label: string;
   hint: string;
   denominator?: string;
+  /** Omit for a metric with nothing behind it yet. */
+  value?: number | string;
+  tone?: "default" | "bad" | "good";
   ring?: boolean;
 }) {
+  const measured = value != null;
+
   return (
     <div className="flex flex-col gap-3 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
       <div className="flex items-center gap-2 text-muted-foreground">
@@ -75,15 +82,27 @@ export function MetricCard({
         <span className="truncate text-[12px] font-medium">{label}</span>
       </div>
       <div className="flex items-center gap-3">
-        {ring ? <ScoreRing score={null} size={48} strokeWidth={5} label={label} /> : null}
+        {ring && !measured ? (
+          <ScoreRing score={null} size={48} strokeWidth={5} label={label} />
+        ) : null}
         <div className="min-w-0">
-          <p className="font-display text-[24px] leading-none text-muted-soft">
-            &mdash;
+          <p
+            className={cn(
+              "font-display text-[24px] leading-none",
+              !measured && "text-muted-soft",
+              measured && tone === "bad" && "text-bad",
+              measured && tone === "good" && "text-good",
+              measured && (tone == null || tone === "default") && "text-ink",
+            )}
+          >
+            {measured ? value : <>&mdash;</>}
             {denominator ? (
               <span className="ml-1 font-mono text-[12px] text-muted-soft">/ {denominator}</span>
             ) : null}
           </p>
-          <p className="mt-1.5 text-[11px] leading-4 text-muted-soft">Not tracked yet</p>
+          {!measured ? (
+            <p className="mt-1.5 text-[11px] leading-4 text-muted-soft">Not tracked yet</p>
+          ) : null}
         </div>
       </div>
       <p className="text-[11px] leading-4 text-muted-soft">{hint}</p>
