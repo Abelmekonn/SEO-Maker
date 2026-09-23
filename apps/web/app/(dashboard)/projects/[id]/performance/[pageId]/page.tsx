@@ -2,6 +2,7 @@ import { prisma, readPerfProgress } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { PerformancePageDetail } from "@/components/project/PerformancePageDetail";
+import { keyOfPage, latestAudits } from "@/lib/page-results";
 import { toAuditView } from "@/lib/perf-view";
 import { getPageForUser, requireUserId } from "@/lib/projects";
 import { pagePath } from "@/lib/site-url";
@@ -25,11 +26,9 @@ export default async function ProjectPerformancePageDetail({
     notFound();
   }
 
+  // By URL, so a run from before the last crawl still shows here.
   const [audits, progress] = await Promise.all([
-    prisma.performanceAudit.findMany({
-      where: { pageId },
-      orderBy: { createdAt: "desc" },
-    }),
+    latestAudits(page.project.id, [keyOfPage(page)]),
     readPerfProgress(prisma, page.project.id),
   ]);
 
@@ -48,8 +47,8 @@ export default async function ProjectPerformancePageDetail({
         pageStatus={page.status}
         projectName={page.project.name}
         initialStrategy={query.device === "desktop" ? "desktop" : "mobile"}
-        mobile={mobile ? toAuditView(mobile, path) : null}
-        desktop={desktop ? toAuditView(desktop, path) : null}
+        mobile={mobile ? toAuditView(mobile, path, pageId) : null}
+        desktop={desktop ? toAuditView(desktop, path, pageId) : null}
         perfStatus={page.project.perfStatus}
         perfError={page.project.perfError}
         perfDone={progress.perfDone}

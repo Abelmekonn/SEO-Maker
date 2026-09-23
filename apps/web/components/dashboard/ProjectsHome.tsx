@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Crawl, Page, PerformanceAudit, Project } from "@seo-maker/db";
+import type { Crawl, Page, Project } from "@seo-maker/db";
 import Link from "next/link";
 import {
   Activity,
@@ -31,7 +31,8 @@ import { cn } from "@/lib/utils";
  */
 
 type ProjectRow = Project & {
-  pages: Array<Page & { performance: PerformanceAudit[] }>;
+  /** Only the first page (the homepage) carries its latest run per device. */
+  pages: Array<Page & { performance: Array<{ strategy: string; performance: number | null }> }>;
 };
 
 type CrawlRow = Crawl & { project: { id: string; name: string; rootUrl: string } };

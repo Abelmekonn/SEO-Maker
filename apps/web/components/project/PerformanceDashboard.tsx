@@ -26,6 +26,7 @@ import {
   Zap,
 } from "lucide-react";
 import { TrendLines } from "@/components/project/OverviewCharts";
+import { PerfPagePicker } from "@/components/project/PerfPagePicker";
 import { PerformanceStatus } from "@/components/project/PerformanceReport";
 import { RunPerformanceButton } from "@/components/project/RunPerformanceButton";
 import { ScoreRing } from "@/components/project/ScoreRing";
@@ -115,6 +116,7 @@ export function PerformanceDashboard({
   audits,
   history,
   suggestedIds,
+  lastRunIds,
   initialSelected,
   active,
   runningPageId,
@@ -135,6 +137,7 @@ export function PerformanceDashboard({
   audits: PerfAuditView[];
   history: PerfHistoryPoint[];
   suggestedIds: string[];
+  lastRunIds: string[];
   initialSelected: string[];
   active: boolean;
   runningPageId: string | null;
@@ -154,12 +157,13 @@ export function PerformanceDashboard({
   const [openOpp, setOpenOpp] = useState<string | null>(null);
   const [openDiag, setOpenDiag] = useState<string | null>(null);
   const [showPlan, setShowPlan] = useState(false);
-  const [selected, setSelected] = useState<string[]>(() =>
-    initialSelected.filter((id) => pages.some((page) => page.id === id)),
-  );
 
-  const pageIds = canSelect ? selected : homepageId ? [homepageId] : [];
   const latest = useMemo(() => latestByStrategy(audits, strategy), [audits, strategy]);
+  const scores = useMemo(
+    () => new Map([...latest.entries()].map(([id, audit]) => [id, audit.performance])),
+    [latest],
+  );
+  const tested = useMemo(() => new Set(audits.map((audit) => audit.pageId)), [audits]);
   const homepageAudit = homepageId ? latest.get(homepageId) ?? null : null;
   const headline = homepageAudit ?? [...latest.values()][0] ?? null;
   const previous = useMemo(() => {
@@ -234,8 +238,6 @@ export function PerformanceDashboard({
     [rows, currentPage, pageSize],
   );
 
-  const crawledIds = pages.filter((page) => page.crawled || page.id === homepageId).map((page) => page.id);
-  const failedIds = crawledIds.filter((id) => !latest.get(id));
   const trend = useMemo(() => {
     const points = history
       .filter((point) => point.strategy === strategy)
@@ -243,37 +245,6 @@ export function PerformanceDashboard({
       .slice(-8);
     return buildHistoryChart(points, headline);
   }, [headline, history, strategy]);
-
-  function toggle(id: string) {
-    if (active || !canSelect) return;
-    setSelected((current) => {
-      if (current.includes(id)) {
-        if (id === homepageId && current.length === 1) return current;
-        return current.filter((value) => value !== id);
-      }
-      if (current.length >= maxPages) return current;
-      return [...current, id];
-    });
-  }
-
-  function selectHomepage() {
-    if (homepageId) setSelected([homepageId]);
-  }
-
-  function selectSuggested() {
-    const next = suggestedIds.filter((id) => pages.some((page) => page.id === id));
-    setSelected(next.length > 0 ? next : homepageId ? [homepageId] : []);
-  }
-
-  function selectAllCrawled() {
-    const next = homepageId && !crawledIds.includes(homepageId) ? [homepageId, ...crawledIds] : crawledIds;
-    setSelected([...new Set(next)].slice(0, maxPages));
-  }
-
-  function selectFailed() {
-    const next = homepageId ? [homepageId, ...failedIds] : failedIds;
-    setSelected([...new Set(next)].slice(0, maxPages));
-  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-5">
@@ -305,17 +276,41 @@ export function PerformanceDashboard({
             <CalendarClock className="size-3.5" aria-hidden />
             Last run {formatRelativeRun(lastRunAt ? new Date(lastRunAt) : null)}
           </span>
-          <RunPerformanceButton
-            projectId={projectId}
-            pageIds={pageIds}
-            active={active}
-            hasResults={audits.length > 0}
-            runLabel="Run Lighthouse"
-          />
+          {canSelect ? (
+            <PerfPagePicker
+              projectId={projectId}
+              pages={pages}
+              homepageId={homepageId}
+              maxPages={maxPages}
+              planLabel={planLabel}
+              strategy={strategy}
+              scores={scores}
+              tested={tested}
+              suggestedIds={suggestedIds}
+              lastRunIds={lastRunIds}
+              initialSelected={initialSelected}
+              active={active}
+              hasResults={audits.length > 0}
+            />
+          ) : (
+            <RunPerformanceButton
+              projectId={projectId}
+              pageIds={homepageId ? [homepageId] : []}
+              active={active}
+              hasResults={audits.length > 0}
+              runLabel="Run Lighthouse"
+            />
+          )}
         </div>
       </header>
 
-      <PerformanceStatus status={perfStatus} error={perfError} done={perfDone} total={perfTotal} />
+      <PerformanceStatus
+        projectId={projectId}
+        status={perfStatus}
+        error={perfError}
+        done={perfDone}
+        total={perfTotal}
+      />
 
       <section aria-label="Lighthouse scores" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <ScoreCard
@@ -405,7 +400,7 @@ export function PerformanceDashboard({
         </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,340px)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,340px)]">
         <section className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
@@ -488,7 +483,7 @@ export function PerformanceDashboard({
         </aside>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
       <section id="opportunities" className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline scroll-mt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -501,7 +496,7 @@ export function PerformanceDashboard({
                 : `${opportunities.length} opportunities found. Improvements with a time or size saving.`}
             </p>
           </div>
-          <div className="flex rounded-full bg-canvas p-1 ring-1 ring-hairline">
+          <div className="flex max-w-full overflow-x-auto rounded-full bg-canvas p-1 ring-1 ring-hairline">
             {(["all", "high", "medium", "low"] as const).map((key) => (
               <button
                 key={key}
@@ -622,29 +617,11 @@ export function PerformanceDashboard({
             </h2>
             <p className="mt-1 text-sm text-body">
               {canSelect
-                ? `${pageIds.length} of ${maxPages} pages selected for the next ${strategy} and desktop run.`
+                ? `Latest ${strategy} results, ${tested.size} of ${pages.length} pages tested. Open a row for the full report.`
                 : "Free includes Lighthouse on the homepage."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canSelect ? (
-              <>
-                <Button type="button" variant="outline" className="h-11 w-fit" disabled={active} onClick={selectHomepage}>
-                  Homepage
-                </Button>
-                {plan === "agency" ? (
-                  <Button type="button" variant="outline" className="h-11 w-fit" disabled={active} onClick={selectSuggested}>
-                    Suggested
-                  </Button>
-                ) : null}
-                <Button type="button" variant="outline" className="h-11 w-fit" disabled={active || crawledIds.length === 0} onClick={selectAllCrawled}>
-                  All crawled
-                </Button>
-                <Button type="button" variant="outline" className="h-11 w-fit" disabled={active || failedIds.length === 0} onClick={selectFailed}>
-                  Re-run missing
-                </Button>
-              </>
-            ) : null}
             <span className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-soft" aria-hidden />
               <input
@@ -661,11 +638,10 @@ export function PerformanceDashboard({
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl bg-surface-soft ring-1 ring-hairline">
+        <div className="overflow-x-auto rounded-2xl bg-surface-soft ring-1 ring-hairline">
           <table className="w-full min-w-[720px] border-collapse text-left text-sm">
             <thead className="font-mono text-[12px] text-muted-foreground">
               <tr>
-                {canSelect ? <th scope="col" className="w-12 px-5 py-3.5 font-medium" /> : null}
                 <th scope="col" className="px-5 py-3.5 font-medium">Page</th>
                 <th scope="col" className="px-5 py-3.5 font-medium">Score</th>
                 <th scope="col" className="px-5 py-3.5 font-medium">LCP</th>
@@ -679,8 +655,6 @@ export function PerformanceDashboard({
             <tbody>
               {pagedRows.map(({ page, audit }) => {
                 const href = `/projects/${projectId}/performance/${page.id}?device=${strategy}`;
-                const checked = selected.includes(page.id);
-                const atCap = !checked && selected.length >= maxPages;
                 const measuring = runningPageId === page.id;
                 const issues = audit?.opportunities.length ?? 0;
                 const band = scoreBand(audit?.performance ?? null);
@@ -701,19 +675,6 @@ export function PerformanceDashboard({
                       }
                     }}
                   >
-                    {canSelect ? (
-                      <td className="px-5 py-4">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={active || atCap}
-                          aria-label={`Select ${page.path}`}
-                          className="size-4 accent-primary"
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={() => toggle(page.id)}
-                        />
-                      </td>
-                    ) : null}
                     <td className="max-w-[240px] px-5 py-4">
                       <p className="truncate font-mono text-ink">{page.path}</p>
                     </td>

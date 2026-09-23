@@ -7,7 +7,8 @@ import { AiPagesTable, type AiPageRow } from "@/components/project/AiPagesTable"
 import { AiQueueStatus } from "@/components/project/AiQueueStatus";
 import { AnalyzeButton } from "@/components/project/AnalyzeButton";
 import { premiumGate } from "@/components/project/PremiumRoute";
-import { aiConfigured, friendlyAiError, getProjectRecommendations } from "@/lib/ai-results";
+import { aiConfigured, friendlyAiError, getProjectRecommendations, isFromEarlierCrawl } from "@/lib/ai-results";
+import { pageKeyIndex } from "@/lib/page-results";
 import { aiLimits, getAiUsage } from "@/lib/ai-usage";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { getAiQueueJobs } from "@/lib/queue";
@@ -70,14 +71,21 @@ export default async function ProjectSuggestionsPage({ params }: { params: Promi
 
   const crawled = project.pages.filter((page) => page.status === "analyzed");
   const pageIds = crawled.map((page) => page.id);
+  // AI results are stored by page URL; these map them onto this crawl's pages.
+  const { idByKey } = pageKeyIndex(project.pages);
 
   const [issues, recommendations, fixRows, recent, usage, running] = await Promise.all([
     prisma.pageIssue.findMany({ where: { pageId: { in: pageIds } }, select: { pageId: true, severity: true } }),
-    getProjectRecommendations(project.id, pageIds),
+    getProjectRecommendations(project.id, crawled),
     prisma.aiResult.findMany({
-      where: { pageId: { in: pageIds }, feature: { not: "page-recommendation" }, status: "ok" },
-      distinct: ["pageId", "feature"],
-      select: { pageId: true, feature: true },
+      where: {
+        projectId: project.id,
+        pageKey: { in: [...idByKey.keys()] },
+        feature: { not: "page-recommendation" },
+        status: "ok",
+      },
+      distinct: ["pageKey", "feature"],
+      select: { pageKey: true, feature: true },
     }),
     prisma.aiResult.findMany({
       where: { projectId: project.id },
@@ -91,7 +99,7 @@ export default async function ProjectSuggestionsPage({ params }: { params: Promi
         inputTokens: true,
         outputTokens: true,
         createdAt: true,
-        page: { select: { id: true, url: true, finalUrl: true } },
+        pageKey: true,
       },
     }),
     getAiUsage(),
@@ -110,8 +118,10 @@ export default async function ProjectSuggestionsPage({ params }: { params: Promi
   }
   const fixesByPage = new Map<string, number>();
   for (const row of fixRows) {
-    if (row.pageId) fixesByPage.set(row.pageId, (fixesByPage.get(row.pageId) ?? 0) + 1);
+    const pageId = row.pageKey ? idByKey.get(row.pageKey) : undefined;
+    if (pageId) fixesByPage.set(pageId, (fixesByPage.get(pageId) ?? 0) + 1);
   }
+  const pathById = new Map(project.pages.map((page) => [page.id, pagePath(page.finalUrl ?? page.url)]));
 
   const rows: AiPageRow[] = crawled
     .filter((page) => byPage.has(page.id))
@@ -128,7 +138,13 @@ export default async function ProjectSuggestionsPage({ params }: { params: Promi
         state: result?.data ? "ready" : result ? "failed" : "none",
         fixes: fixesByPage.get(page.id) ?? 0,
         failure: result && !result.data ? friendlyAiError(result.error) : null,
-        lastRun: result ? relative(result.createdAt) : null,
+        lastRun: result
+          ? `${relative(result.createdAt)}${
+              isFromEarlierCrawl(result, page)
+                ? " · earlier crawl"
+                : ""
+            }`
+          : null,
       } satisfies AiPageRow;
     })
     .sort(
@@ -255,10 +271,12 @@ export default async function ProjectSuggestionsPage({ params }: { params: Promi
               <p className="text-sm leading-6 text-body">Nothing has run yet. Analysed pages appear here.</p>
             ) : (
               <ul className="flex flex-col">
-                {recent.map((row) => (
+                {recent.map((row) => {
+                  const pageId = row.pageKey ? idByKey.get(row.pageKey) : undefined;
+                  return (
                   <li key={row.id} className="border-t border-hairline first:border-t-0">
                     <Link
-                      href={row.page ? `/projects/${project.id}/pages/${row.page.id}` : `/projects/${project.id}/pages`}
+                      href={pageId ? `/projects/${project.id}/pages/${pageId}` : `/projects/${project.id}/pages`}
                       className="flex min-h-11 items-center gap-3 py-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       title={row.status === "ok" ? undefined : friendlyAiError(row.error)}
                     >
@@ -269,7 +287,7 @@ export default async function ProjectSuggestionsPage({ params }: { params: Promi
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm text-ink">{FEATURE_LABEL[row.feature] ?? row.feature}</span>
                         <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                          {row.page ? pagePath(row.page.finalUrl ?? row.page.url) : "site"}
+                          {pageId ? pathById.get(pageId) : row.pageKey ? `/${row.pageKey.split("/").slice(1).join("/")}` : "site"}
                         </span>
                       </span>
                       <span className="shrink-0 text-right font-mono text-[11px] text-muted-foreground">
@@ -280,7 +298,8 @@ export default async function ProjectSuggestionsPage({ params }: { params: Promi
                       </span>
                     </Link>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </Panel>

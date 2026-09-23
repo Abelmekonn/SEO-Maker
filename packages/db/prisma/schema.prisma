@@ -81,6 +81,7 @@ model Project {
   contentGaps       ContentGap[]
   opportunities     Opportunity[]
   aiResults         AiResult[]
+  performanceAudits PerformanceAudit[]
 
   @@unique([userId, siteKey])
   @@index([userId])
@@ -256,8 +257,14 @@ model AiResult {
   id        String  @id @default(cuid())
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// The page's URL identity (see pageKeyOf), stable across crawls. Page
+  /// results are read by this, so a re-crawl keeps them. Null for site-level
+  /// features.
+  pageKey   String?
+  /// The crawl's page row it was written from. Set to null, not deleted, when
+  /// that crawl is pruned from history.
   pageId    String?
-  page      Page?   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  page      Page?   @relation(fields: [pageId], references: [id], onDelete: SetNull)
 
   feature String
   mode    String @default("quick")
@@ -283,12 +290,24 @@ model AiResult {
   @@index([projectId, feature])
   @@index([pageId, feature])
   @@index([inputHash])
+  @@index([projectId, pageKey, feature, createdAt])
 }
 
+/// One Lighthouse run of one page on one device.
+///
+/// Read by (projectId, pageKey), not pageId: each crawl writes new Page rows,
+/// and results tied to a row id disappeared from every screen at the next
+/// crawl. The worker keeps the newest runs per page and device (see
+/// run-performance), which bounds history now that crawls no longer cascade.
 model PerformanceAudit {
   id            String   @id @default(cuid())
-  pageId        String
-  page          Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// The page's URL identity (see pageKeyOf), stable across crawls.
+  pageKey       String
+  /// The crawl's page row it was measured for. Null once that crawl is pruned.
+  pageId        String?
+  page          Page?    @relation(fields: [pageId], references: [id], onDelete: SetNull)
   strategy      String
   performance   Float?
   accessibility Float?
@@ -308,6 +327,7 @@ model PerformanceAudit {
   createdAt     DateTime @default(now())
 
   @@index([pageId])
+  @@index([projectId, pageKey, strategy, createdAt])
 }
 
 /// source: manual | serp | ai

@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { type Page, prisma } from "@seo-maker/db";
+import { type Page, Prisma, prisma } from "@seo-maker/db";
+import { keyOfPage } from "@/lib/page-results";
 
 export async function requireUserId() {
   const { userId } = await auth();
@@ -43,10 +44,17 @@ export async function getProjectForUser(id: string, userId: string) {
   return { ...project, pages: await latestPages(project) };
 }
 
-/** The finished crawls for a project, newest first, for history and comparison. */
-export async function getCrawlHistory(projectId: string, take = 10) {
+/**
+ * The finished crawls for a project, newest first, for history and comparison.
+ * `currentId` also brings in the crawl on screen when the user stopped it part
+ * way (a first crawl's partial results), which is otherwise left out.
+ */
+export async function getCrawlHistory(projectId: string, take = 10, currentId?: string | null) {
   return prisma.crawl.findMany({
-    where: { projectId, status: { in: ["completed", "failed"] } },
+    where: {
+      projectId,
+      OR: [{ status: { in: ["completed", "failed"] } }, ...(currentId ? [{ id: currentId }] : [])],
+    },
     orderBy: { startedAt: "desc" },
     take,
   });
@@ -84,7 +92,6 @@ export async function listProjectsForUser(userId: string) {
         ? { OR: [{ crawlId: { in: crawlIds } }, { projectId: { in: projects.map((p) => p.id) }, crawlId: null }] }
         : { projectId: { in: projects.map((project) => project.id) }, crawlId: null },
     orderBy: { createdAt: "asc" },
-    include: { performance: { orderBy: { createdAt: "desc" } } },
   });
 
   const byProject = new Map<string, typeof pages>();
@@ -105,7 +112,29 @@ export async function listProjectsForUser(userId: string) {
     }
   }
 
-  return projects.map((project) => ({ ...project, pages: byProject.get(project.id) ?? [] }));
+  // The list shows each site's homepage score (its first page). One DISTINCT
+  // ON query for the newest run per homepage and device, by page key so a
+  // re-crawl keeps it, instead of every run of every page.
+  const homes = projects.flatMap((project) => {
+    const first = byProject.get(project.id)?.[0];
+    return first ? [{ projectId: project.id, pageKey: keyOfPage(first) }] : [];
+  });
+  const runs =
+    homes.length > 0
+      ? await prisma.$queryRaw<Array<{ projectId: string; strategy: string; performance: number | null }>>`
+          SELECT DISTINCT ON ("projectId", "pageKey", "strategy") "projectId", "strategy", "performance"
+          FROM "PerformanceAudit"
+          WHERE ("projectId", "pageKey") IN (${Prisma.join(homes.map((home) => Prisma.sql`(${home.projectId}, ${home.pageKey})`))})
+          ORDER BY "projectId", "pageKey", "strategy", "createdAt" DESC`
+      : [];
+
+  return projects.map((project) => ({
+    ...project,
+    pages: (byProject.get(project.id) ?? []).map((page, index) => ({
+      ...page,
+      performance: index === 0 ? runs.filter((run) => run.projectId === project.id) : [],
+    })),
+  }));
 }
 
 /** Latest-crawl pages for a project id, for callers that hold no project row. */

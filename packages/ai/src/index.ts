@@ -37,6 +37,8 @@ export type RunAiFeatureInput<T> = {
   schema: z.ZodType<T>;
   projectId: string;
   pageId?: string | null;
+  /** The page's URL identity (pageKeyOf). Page results are read by it. */
+  pageKey?: string | null;
   plan?: Plan | null;
 
   /** Which knowledge to retrieve. Omit to skip grounding entirely. */
@@ -111,11 +113,40 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
       const parsed = input.schema.safeParse(cached.output);
       const refined = parsed.success ? (input.refine ? input.refine(parsed.data) : { ok: true as const, data: parsed.data }) : null;
       if (refined?.ok) {
+        // A hit from another page row (an earlier crawl of this page, or the
+        // same page in another project) is recorded for this one: the input is
+        // identical, so the answer holds, and without a row of its own this
+        // page would read as not analysed. No tokens are spent.
+        const reused =
+          cached.pageId === (input.pageId ?? null) && cached.projectId === input.projectId
+            ? cached.id
+            : (
+                await prisma.aiResult.create({
+                  data: {
+                    projectId: input.projectId,
+                    pageId: input.pageId ?? null,
+                    pageKey: input.pageKey ?? null,
+                    feature: input.feature,
+                    mode: input.mode,
+                    provider: cached.provider,
+                    model: cached.model,
+                    promptVersion: cached.promptVersion,
+                    knowledgeVersion: cached.knowledgeVersion,
+                    inputHash,
+                    output: cached.output as object,
+                    status: "ok",
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    estimatedCost: 0,
+                  },
+                  select: { id: true },
+                })
+              ).id;
         return {
           status: "ok",
           data: refined.data,
           cached: true,
-          aiResultId: cached.id,
+          aiResultId: reused,
           knowledgeVersion: bundle.knowledgeVersion,
         };
       }
@@ -124,6 +155,10 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
 
   const knowledgeBlock = buildKnowledgeContext(bundle);
   const { system, user } = input.buildPrompt(knowledgeBlock, bundle);
+
+  if (input.signal?.aborted) {
+    return { status: "failed", error: new AiError("cancelled", "The AI call was cancelled."), aiResultId: null };
+  }
 
   try {
     const response = await generateStructured(
@@ -158,6 +193,7 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
       data: {
         projectId: input.projectId,
         pageId: input.pageId ?? null,
+        pageKey: input.pageKey ?? null,
         feature: input.feature,
         mode: input.mode,
         provider: response.provider,
@@ -189,12 +225,19 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
             detail: error instanceof Error ? error.message : String(error),
           });
 
+    // A user stopping the work is not a failure of the page. Recording it
+    // would show "AI failed" on a page nobody asked to finish.
+    if (aiError.kind === "cancelled") {
+      return { status: "failed", error: aiError, aiResultId: null };
+    }
+
     // A failure is a row, not a silent gap. Without it, "why is there no
     // suggestion on this page" has no answer anyone can look up.
     const row = await prisma.aiResult.create({
       data: {
         projectId: input.projectId,
         pageId: input.pageId ?? null,
+        pageKey: input.pageKey ?? null,
         feature: input.feature,
         mode: input.mode,
         provider: config.provider,

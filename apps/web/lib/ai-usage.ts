@@ -54,8 +54,9 @@ export async function getAiUsage(): Promise<AiUsage> {
   const { tokensPerMinute, dailyTokenBudget } = aiLimits();
 
   const [day, failed, rateLimited, week] = await Promise.all([
+    // Cache reuse is stored as a zero-token copy; it is not a provider call.
     prisma.aiResult.aggregate({
-      where: { createdAt: { gte: since } },
+      where: { createdAt: { gte: since }, OR: [{ inputTokens: null }, { inputTokens: { not: 0 } }] },
       _sum: { inputTokens: true, outputTokens: true, estimatedCost: true },
       _count: { _all: true },
     }),
@@ -63,7 +64,7 @@ export async function getAiUsage(): Promise<AiUsage> {
     prisma.aiResult.count({ where: { createdAt: { gte: since }, error: { startsWith: "rate-limited" } } }),
     prisma.aiResult.groupBy({
       by: ["pageId"],
-      where: { createdAt: { gte: weekAgo }, status: "ok", pageId: { not: null } },
+      where: { createdAt: { gte: weekAgo }, status: "ok", pageId: { not: null }, inputTokens: { gt: 0 } },
       _sum: { inputTokens: true, outputTokens: true },
     }),
   ]);

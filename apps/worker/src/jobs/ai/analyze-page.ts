@@ -24,6 +24,7 @@ import {
   type PageContext,
   type PageFeature,
 } from "@seo-maker/ai";
+import { pageKeyOf } from "@seo-maker/core/crawl";
 import { fixPlanInputFromPage, planFixes } from "@seo-maker/core/page";
 import type { AiPageAnalyzeJob } from "@seo-maker/core/queue";
 import { prisma } from "@seo-maker/db";
@@ -93,7 +94,12 @@ function recommendationPrompt(context: PageContext, business: BusinessBlock, kno
   ].join("\n");
 }
 
-export async function aiAnalyzePageJob(job: AiPageAnalyzeJob): Promise<void> {
+/**
+ * `signal` aborts when the user stops this project's AI work. The model call in
+ * flight is cancelled, nothing is recorded for it, and no further features run.
+ * Results already written stay.
+ */
+export async function aiAnalyzePageJob(job: AiPageAnalyzeJob, signal?: AbortSignal): Promise<void> {
   const [context, site, page] = await Promise.all([
     buildPageContext(job.pageId),
     buildSiteContext(job.projectId),
@@ -110,6 +116,7 @@ export async function aiAnalyzePageJob(job: AiPageAnalyzeJob): Promise<void> {
     job.mode === "deep" && site.business ? { ...site.business, siteName: site.name } : null;
 
   const self = page.finalUrl ?? page.url;
+  const pageKey = pageKeyOf(self);
   const plan = planFixes(
     fixPlanInputFromPage(page, site.knownUrls.filter((url) => url !== self).length),
   );
@@ -126,7 +133,9 @@ export async function aiAnalyzePageJob(job: AiPageAnalyzeJob): Promise<void> {
       schema: pageRecommendationSchema,
       projectId: job.projectId,
       pageId: job.pageId,
+      pageKey,
       force: job.force,
+      signal,
       knowledge: {
         checks,
         applicability: ["page_audit", "reporting_language", "myth_guard"],
@@ -153,6 +162,7 @@ export async function aiAnalyzePageJob(job: AiPageAnalyzeJob): Promise<void> {
     });
     report(job.pageId, "page-recommendation", result);
   }
+  if (signal?.aborted) return;
 
   // 2. Generate a fix for each check the plan routes to AI. Deterministic and
   // blocked checks are answered by the plan itself and never cost a call.
@@ -170,6 +180,7 @@ export async function aiAnalyzePageJob(job: AiPageAnalyzeJob): Promise<void> {
   }
 
   for (const feature of features) {
+    if (signal?.aborted) return;
     const spec = pageFeatureSpec(feature, context, site, business);
     const result = await runAiFeature({
       feature: spec.feature,
@@ -177,6 +188,7 @@ export async function aiAnalyzePageJob(job: AiPageAnalyzeJob): Promise<void> {
       schema: spec.schema,
       projectId: job.projectId,
       pageId: job.pageId,
+      pageKey,
       force: job.force,
       knowledge: spec.knowledge,
       evidence: spec.evidence,
@@ -185,6 +197,7 @@ export async function aiAnalyzePageJob(job: AiPageAnalyzeJob): Promise<void> {
       refine: spec.refine,
       maxTokens: spec.maxTokens,
       temperature: spec.temperature,
+      signal,
     });
     report(job.pageId, feature, result);
   }
@@ -200,6 +213,10 @@ function report(
   feature: string,
   result: Awaited<ReturnType<typeof runAiFeature>>,
 ): void {
+  if (result.status === "failed" && result.error.kind === "cancelled") {
+    console.log(`AI page ${pageId} ${feature}: stopped`);
+    return;
+  }
   if (result.status === "failed") {
     // Recorded as an AiResult row by runAiFeature. Logged, not thrown: a
     // provider outage must not fail the job and trigger a retry storm.

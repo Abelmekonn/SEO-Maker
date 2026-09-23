@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
 import { requireUserId } from "@/lib/projects";
+import { PERF_ACTIVE } from "@/lib/performance";
 import { getAiQueueJobs } from "@/lib/queue";
 
 /**
@@ -24,7 +25,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const [crawl, aiJobs] = await Promise.all([
     prisma.crawl.findFirst({
-      where: { projectId: id, status: { in: ["crawling", "analyzing"] } },
+      where: { projectId: id, status: { in: ["crawling", "analyzing", "cancelling"] } },
       orderBy: { startedAt: "desc" },
       select: { id: true, maxPages: true },
     }),
@@ -42,7 +43,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       total: crawl ? crawl.maxPages : 0,
     },
     performance: {
-      running: project.perfStatus === "queued" || project.perfStatus === "running",
+      running: PERF_ACTIVE.has(project.perfStatus),
       done: project.perfDone,
       total: project.perfTotal,
     },

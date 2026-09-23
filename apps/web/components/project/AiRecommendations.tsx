@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Sparkles } from "lucide-react";
+import { History, Sparkles } from "lucide-react";
 import { type PageAiResult, friendlyAiError } from "@/lib/ai-results";
 import { AnalyzeButton } from "@/components/project/AnalyzeButton";
 import { UpgradePrompt } from "@/components/project/UpgradePrompt";
@@ -25,9 +25,15 @@ export function AiRecommendations({
   planAllowsAi = true,
   planLabel,
   status,
+  earlier = null,
   children,
 }: {
   result: PageAiResult | null;
+  /**
+   * Set when the analysis was written for an earlier crawl of this page.
+   * `fixed` counts the problems it explained that this crawl no longer finds.
+   */
+  earlier?: { at: Date; fixed: number } | null;
   projectId: string;
   pageId: string;
   aiEnabled: boolean;
@@ -107,6 +113,19 @@ export function AiRecommendations({
             </div>
           ) : (
             <div className="rounded-lg bg-surface-soft p-6 ring-1 ring-hairline">
+              {earlier ? (
+                <p className="mb-3 flex items-start gap-2 rounded-md bg-surface-card px-3 py-2 text-xs leading-5 text-body">
+                  <History className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span>
+                    Written for the crawl of{" "}
+                    {earlier.at.toLocaleDateString("en-US", { month: "short", day: "numeric" })}.
+                    {earlier.fixed > 0
+                      ? ` ${earlier.fixed} ${earlier.fixed === 1 ? "problem it covered is" : "problems it covered are"} fixed now and left out below.`
+                      : ""}{" "}
+                    Re-analyse to explain this crawl.
+                  </span>
+                </p>
+              ) : null}
               <p className="text-sm leading-6 text-body">{result.data.summary}</p>
               {result.data.needsHumanReview ? (
                 <p className="mt-3 rounded-md bg-warn/10 px-3 py-2 text-xs leading-5 text-warn">

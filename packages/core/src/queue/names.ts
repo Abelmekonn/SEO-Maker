@@ -113,6 +113,17 @@ export type AiPageAnalyzeJob = {
   force?: boolean;
 };
 
+/**
+ * Redis key holding when a user last asked to stop a project's AI work, in
+ * epoch milliseconds. A running job stops when the request is newer than the
+ * job itself, so work queued after the stop still runs. Crawls and PageSpeed
+ * carry their stop request on their own database rows instead; AI jobs have no
+ * row of their own until they finish.
+ */
+export function aiStopKey(projectId: string): string {
+  return `seo-maker:ai-stop:${projectId}`;
+}
+
 export type AiSiteAnalyzeJob = {
   projectId: string;
   crawlId?: string;

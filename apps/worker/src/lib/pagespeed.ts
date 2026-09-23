@@ -38,7 +38,11 @@ export class PageSpeedError extends Error {
   }
 }
 
-export async function runPageSpeed(url: string, strategy: Strategy): Promise<PageSpeedResult> {
+export async function runPageSpeed(
+  url: string,
+  strategy: Strategy,
+  signal?: AbortSignal,
+): Promise<PageSpeedResult> {
   const apiKey = process.env.PAGESPEED_API_KEY?.trim();
   if (!apiKey) {
     throw new PageSpeedError(
@@ -56,6 +60,9 @@ export async function runPageSpeed(url: string, strategy: Strategy): Promise<Pag
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 120_000);
+  // A user stopping the run ends the call now rather than after Lighthouse.
+  const onStop = () => controller.abort();
+  signal?.addEventListener("abort", onStop, { once: true });
 
   let response: Response;
   try {
@@ -65,12 +72,15 @@ export async function runPageSpeed(url: string, strategy: Strategy): Promise<Pag
     });
   } catch (error) {
     throw new PageSpeedError(
-      error instanceof Error && error.name === "AbortError"
-        ? "PageSpeed took longer than two minutes and was cancelled."
-        : `Could not reach PageSpeed: ${error instanceof Error ? error.message : String(error)}`,
+      signal?.aborted
+        ? "Stopped."
+        : error instanceof Error && error.name === "AbortError"
+          ? "PageSpeed took longer than two minutes and was cancelled."
+          : `Could not reach PageSpeed: ${error instanceof Error ? error.message : String(error)}`,
     );
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onStop);
   }
 
   if (!response.ok) {

@@ -70,6 +70,27 @@ const MAX_RATE_LIMIT_WAIT_MS = 65_000;
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
+ * A wait that ends early when the caller cancels. A rate-limit wait can hold a
+ * job for over a minute, and a user who pressed Stop should not sit through it.
+ */
+function sleepUnlessAborted(ms: number, signal: AbortSignal | undefined, sleep: (ms: number) => Promise<void>) {
+  if (!signal) return sleep(ms);
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    signal.addEventListener("abort", done, { once: true });
+    void sleep(ms).then(done);
+  });
+}
+
+function cancelled(): AiError {
+  return new AiError("cancelled", "The AI call was cancelled.");
+}
+
+/**
  * Calls the provider with bounded retries and exponential backoff (Phase 1.4).
  *
  * Only `retryable` failures are retried. A 401 or an unknown provider fails on
@@ -88,6 +109,9 @@ export async function generateStructured<T>(
   let rateLimitWaits = 0;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
+    if (request.signal?.aborted) {
+      throw cancelled();
+    }
     try {
       const result = await provider.generateStructured(request);
       return { ...result, attempts: attempt };
@@ -101,6 +125,10 @@ export async function generateStructured<T>(
 
       lastError = aiError;
 
+      if (aiError.kind === "cancelled" || request.signal?.aborted) {
+        throw cancelled();
+      }
+
       if (aiError.kind === "rate-limited" && aiError.retryAfterMs != null) {
         if (aiError.retryAfterMs > MAX_RATE_LIMIT_WAIT_MS || rateLimitWaits >= RATE_LIMIT_RETRIES) {
           throw aiError;
@@ -109,7 +137,7 @@ export async function generateStructured<T>(
         // A rate-limit wait is not a failed attempt at the task itself, so it
         // does not use up the ordinary retry budget.
         attempt -= 1;
-        await sleep(aiError.retryAfterMs + 250 + Math.floor(Math.random() * 750));
+        await sleepUnlessAborted(aiError.retryAfterMs + 250 + Math.floor(Math.random() * 750), request.signal, sleep);
         continue;
       }
 
@@ -120,7 +148,7 @@ export async function generateStructured<T>(
       // 400ms, 800ms, 1600ms, with jitter so concurrent jobs do not retry in
       // lockstep after a shared rate-limit response.
       const backoff = 400 * 2 ** (attempt - 1);
-      await sleep(backoff + Math.floor(Math.random() * 200));
+      await sleepUnlessAborted(backoff + Math.floor(Math.random() * 200), request.signal, sleep);
     }
   }
 

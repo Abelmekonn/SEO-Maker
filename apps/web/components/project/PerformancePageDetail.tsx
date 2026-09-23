@@ -127,7 +127,13 @@ export function PerformancePageDetail({
         </div>
       </header>
 
-      <PerformanceStatus status={perfStatus} error={perfError} done={perfDone} total={perfTotal} />
+      <PerformanceStatus
+        projectId={projectId}
+        status={perfStatus}
+        error={perfError}
+        done={perfDone}
+        total={perfTotal}
+      />
 
       <section className="grid gap-3 md:grid-cols-4">
         <div className="rounded-xl bg-surface-soft p-4 ring-1 ring-primary/40">

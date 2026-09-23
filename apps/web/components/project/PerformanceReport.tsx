@@ -1,5 +1,6 @@
 import type { PerformanceAudit } from "@seo-maker/db";
-import { CircleAlert, LoaderCircle, Monitor, Smartphone } from "lucide-react";
+import { CircleAlert, CircleStop, LoaderCircle, Monitor, Smartphone } from "lucide-react";
+import { StopWorkButton } from "@/components/project/StopWorkButton";
 import {
   formatSavings,
   readDiagnostics,
@@ -41,31 +42,94 @@ const ratingLabel: Record<Rating, string> = {
 };
 
 export function PerformanceStatus({
+  projectId,
   status,
   error,
   done = 0,
   total = 0,
 }: {
+  /** Enables the Stop button while a run is queued or running. */
+  projectId?: string;
   status: string;
   error: string | null;
   done?: number;
   total?: number;
 }) {
-  if (status === "queued" || status === "running") {
+  if (status === "queued" || status === "running" || status === "cancelling") {
     const scoped = total > 1;
     const pageLabel = scoped ? ` Page ${Math.min(done + 1, total)} of ${total}.` : "";
+    const left = Math.max(1, total - done);
     return (
       <div
         role="status"
-        className="flex items-center gap-3 rounded-lg bg-surface-soft px-5 py-4 ring-1 ring-primary/40"
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-lg bg-surface-soft px-5 py-4 ring-1",
+          status === "cancelling" ? "ring-warn/40" : "ring-primary/40",
+        )}
       >
-        <LoaderCircle className="size-4 shrink-0 animate-spin text-primary" aria-hidden />
-        <p className="text-sm text-ink">
-          {status === "queued"
-            ? scoped
-              ? `Queued. ${total} pages. The worker will pick this up in a moment.`
-              : "Queued. The worker will pick this up in a moment."
-            : `Running PageSpeed on mobile, then desktop.${pageLabel} This takes about a minute per page.`}
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <LoaderCircle
+            className={cn("size-4 shrink-0 animate-spin", status === "cancelling" ? "text-warn" : "text-primary")}
+            aria-hidden
+          />
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <p className="text-sm text-ink">
+              {status === "cancelling"
+                ? "Stopping PageSpeed. Pages already measured are kept."
+                : status === "queued"
+                  ? scoped
+                    ? `Queued. ${total} pages. The worker will pick this up in a moment.`
+                    : "Queued. The worker will pick this up in a moment."
+                  : `Running PageSpeed on mobile, then desktop.${pageLabel} About ${left} ${left === 1 ? "minute" : "minutes"} left.`}
+            </p>
+            {scoped && status === "running" ? (
+              <div
+                role="progressbar"
+                aria-label="Pages measured"
+                aria-valuemin={0}
+                aria-valuemax={total}
+                aria-valuenow={done}
+                className="h-1 max-w-md overflow-hidden rounded-full bg-canvas"
+              >
+                <span
+                  className="block h-full rounded-full bg-primary transition-[width] duration-500"
+                  style={{ width: `${Math.max(3, Math.round((done / total) * 100))}%` }}
+                />
+              </div>
+            ) : null}
+          </div>
+        </div>
+        {projectId ? (
+          <StopWorkButton
+            endpoint={`/api/projects/${projectId}/performance`}
+            noun="PageSpeed"
+            size="compact"
+            stopping={status === "cancelling"}
+            title="Stop PageSpeed?"
+            onStopped={() => window.dispatchEvent(new Event("seo-maker:perf-queued"))}
+          >
+            <p>
+              {done > 0
+                ? `Results for the ${done} ${done === 1 ? "page" : "pages"} already measured are kept. `
+                : ""}
+              {status === "queued"
+                ? "The run has not started, so nothing is lost."
+                : "The Lighthouse test in progress is dropped, and the remaining pages are not tested."}
+            </p>
+          </StopWorkButton>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (status === "cancelled") {
+    return (
+      <div role="status" className="flex items-start gap-3 rounded-lg bg-surface-soft px-5 py-4 ring-1 ring-warn/30">
+        <CircleStop className="mt-0.5 size-4 shrink-0 text-warn" aria-hidden />
+        <p className="text-sm leading-6 text-body">
+          <span className="text-ink">You stopped the last PageSpeed run</span>
+          {total > 0 ? ` after ${done} of ${total} ${total === 1 ? "page" : "pages"}` : ""}.{" "}
+          {done > 0 ? "Those results are below." : "Nothing was measured."}
         </p>
       </div>
     );

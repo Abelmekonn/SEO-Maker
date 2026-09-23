@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
 import { getAiUsage } from "@/lib/ai-usage";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
-import { getAiQueueJobs } from "@/lib/queue";
+import { getAiQueueJobs, getAiStopAt } from "@/lib/queue";
 import { pagePath } from "@/lib/site-url";
 
 /**
@@ -23,12 +23,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
 
   let jobs: Awaited<ReturnType<typeof getAiQueueJobs>> = [];
+  let stopAt: number | null = null;
   let queueOnline = true;
   try {
-    jobs = await getAiQueueJobs(project.id);
+    [jobs, stopAt] = await Promise.all([getAiQueueJobs(project.id), getAiStopAt(project.id)]);
   } catch {
     queueOnline = false;
   }
+  // Work queued before the last Stop is on its way out, not still to come.
+  const stopping = stopAt != null && jobs.some((job) => job.queuedAt <= stopAt);
 
   const [usage, pages] = await Promise.all([
     getAiUsage(),
@@ -48,6 +51,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   return NextResponse.json({
     queueOnline,
+    stopping,
     jobs: jobs.map((job) => ({ ...job, path: paths.get(job.pageId) ?? null })),
     etaMinutes,
     usage,

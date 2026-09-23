@@ -13,7 +13,8 @@ import { PageFixes } from "@/components/project/PageFixes";
 import { PremiumPage } from "@/components/project/PremiumGate";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { StatusBadge } from "@/components/project/StatusBadge";
-import { aiConfigured, getPageFeatureResults, getPageRecommendation } from "@/lib/ai-results";
+import { aiConfigured, getPageFeatureResults, getPageRecommendation, isFromEarlierCrawl } from "@/lib/ai-results";
+import { keyOfPage } from "@/lib/page-results";
 import { getAccountForUser } from "@/lib/plan";
 import { getPageForUser, latestPages, requireUserId } from "@/lib/projects";
 import { findHomepage, pagePath } from "@/lib/site-url";
@@ -35,9 +36,11 @@ export default async function ProjectPageDetailPage({
     notFound();
   }
 
+  // Read by URL, so an analysis from before the last crawl still shows.
+  const pageKey = keyOfPage(page);
   const [recommendation, features, account, knownUrlCount] = await Promise.all([
-    getPageRecommendation(page.id),
-    getPageFeatureResults(page.id),
+    getPageRecommendation(page.projectId, pageKey),
+    getPageFeatureResults(page.projectId, pageKey),
     getAccountForUser(userId),
     // The other crawled pages are the only valid internal-link targets, so the
     // fix plan counts them the same way the worker does.
@@ -46,6 +49,17 @@ export default async function ProjectPageDetailPage({
     }),
   ]);
   const plan = planFixes(fixPlanInputFromPage(page, knownUrlCount));
+
+  // An explanation written for an earlier crawl: say so, and count the
+  // problems it covered that this crawl no longer finds.
+  const failing = new Set(page.issues.map((issue) => issue.checkId));
+  const earlier =
+    recommendation?.data && isFromEarlierCrawl(recommendation, page)
+      ? {
+          at: recommendation.createdAt,
+          fixed: recommendation.data.recommendations.filter((item) => !failing.has(item.checkId)).length,
+        }
+      : null;
   const liveUrl = page.finalUrl ?? page.url;
   const premium = account.plan !== "free";
 
@@ -113,6 +127,7 @@ export default async function ProjectPageDetailPage({
         planAllowsAi={account.limits.ai}
         planLabel={account.limits.label}
         status={<AiQueueStatus projectId={id} pageId={page.id} />}
+        earlier={earlier}
       >
         <PageFixes
           projectId={id}

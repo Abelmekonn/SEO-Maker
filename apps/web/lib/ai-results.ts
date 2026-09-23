@@ -1,6 +1,7 @@
 import { prisma } from "@seo-maker/db";
 import type { PageRecommendation } from "@seo-maker/ai/schemas";
 import { FEATURE_SCHEMAS, pageRecommendationSchema } from "@seo-maker/ai/schemas";
+import { pageKeyIndex } from "@/lib/page-results";
 
 /**
  * Reading the AI layer's output (Phase 1).
@@ -9,6 +10,11 @@ import { FEATURE_SCHEMAS, pageRecommendationSchema } from "@seo-maker/ai/schemas
  * tighten between the run that produced a row and the render that reads it,
  * and a row written under the old shape must not crash the page — it degrades
  * to "no usable result" instead.
+ *
+ * Page results are read by page key (the page's URL), never by page id: each
+ * crawl writes new page rows, and a result tied to a row id vanished at the
+ * next crawl. A result older than the page row on screen was written for an
+ * earlier crawl of that page (see isFromEarlierCrawl).
  */
 
 export type PageAiResult = {
@@ -69,10 +75,18 @@ function toResult(row: Row): PageAiResult {
   };
 }
 
+/**
+ * Whether a result predates the crawl on screen. The page row is written when
+ * the crawl fetches it, so anything older was produced from an earlier crawl.
+ */
+export function isFromEarlierCrawl(result: { createdAt: Date }, page: { createdAt: Date }): boolean {
+  return result.createdAt < page.createdAt;
+}
+
 /** The most recent page-recommendation result for one page, if any. */
-export async function getPageRecommendation(pageId: string): Promise<PageAiResult | null> {
+export async function getPageRecommendation(projectId: string, pageKey: string): Promise<PageAiResult | null> {
   const row = await prisma.aiResult.findFirst({
-    where: { pageId, feature: "page-recommendation" },
+    where: { projectId, pageKey, feature: "page-recommendation" },
     orderBy: { createdAt: "desc" },
     select: SELECT,
   });
@@ -80,30 +94,33 @@ export async function getPageRecommendation(pageId: string): Promise<PageAiResul
 }
 
 /**
- * Latest page-recommendation per page for a project, keyed by pageId.
+ * Latest page-recommendation per page for a project, keyed by the id of the
+ * page on screen.
  *
  * One query rather than N: the suggestions list renders every page in the
  * crawl, and a per-page lookup there would be a round trip per row.
  */
 export async function getProjectRecommendations(
   projectId: string,
-  pageIds: string[],
+  pages: Array<{ id: string; url: string; finalUrl: string | null }>,
 ): Promise<Map<string, PageAiResult>> {
-  if (pageIds.length === 0) {
+  if (pages.length === 0) {
     return new Map();
   }
+  const { idByKey } = pageKeyIndex(pages);
 
   const rows = await prisma.aiResult.findMany({
-    where: { projectId, feature: "page-recommendation", pageId: { in: pageIds } },
+    where: { projectId, feature: "page-recommendation", pageKey: { in: [...idByKey.keys()] } },
     orderBy: { createdAt: "desc" },
-    select: { ...SELECT, pageId: true },
+    select: { ...SELECT, pageKey: true },
   });
 
   const byPage = new Map<string, PageAiResult>();
-  for (const row of rows as (Row & { pageId: string | null })[]) {
+  for (const row of rows as (Row & { pageKey: string | null })[]) {
+    const pageId = row.pageKey ? idByKey.get(row.pageKey) : undefined;
     // Rows come newest first, so the first one seen per page is the current one.
-    if (row.pageId && !byPage.has(row.pageId)) {
-      byPage.set(row.pageId, toResult(row));
+    if (pageId && !byPage.has(pageId)) {
+      byPage.set(pageId, toResult(row));
     }
   }
   return byPage;
@@ -132,9 +149,9 @@ export type FeatureResult = {
  * current contract, and a row that no longer fits degrades to "no result"
  * rather than rendering unchecked data.
  */
-export async function getPageFeatureResults(pageId: string): Promise<Map<string, FeatureResult>> {
+export async function getPageFeatureResults(projectId: string, pageKey: string): Promise<Map<string, FeatureResult>> {
   const rows = await prisma.aiResult.findMany({
-    where: { pageId, feature: { not: "page-recommendation" } },
+    where: { projectId, pageKey, feature: { not: "page-recommendation" } },
     orderBy: { createdAt: "desc" },
     select: { ...SELECT, estimatedCost: true },
   });

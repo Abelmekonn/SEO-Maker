@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { PerformanceDashboard } from "@/components/project/PerformanceDashboard";
 import { isCrawled } from "@/lib/page-audit";
+import { auditHistory, keyOfPage, latestAudits, pageKeyIndex } from "@/lib/page-results";
 import { defaultPerfPageIds, readPerfPageIds } from "@/lib/perf-scope";
 import { toAuditView } from "@/lib/perf-view";
 import { getAccountForUser } from "@/lib/plan";
@@ -31,14 +32,14 @@ export default async function ProjectPerformancePage({
   const homepage = findHomepage(project.pages, project.rootUrl);
   const parsed = normalizeSiteUrl(project.rootUrl);
   const hostname = "hostname" in parsed ? parsed.hostname : project.name;
-  const pageIds = project.pages.map((page) => page.id);
   const pathById = new Map(project.pages.map((page) => [page.id, pagePath(page.finalUrl ?? page.url)]));
+  // Results are stored by page URL, so runs from before the last crawl still count.
+  const { idByKey } = pageKeyIndex(project.pages);
+  const homepageKey = homepage ? keyOfPage(homepage) : null;
 
-  const [audits, progress] = await Promise.all([
-    prisma.performanceAudit.findMany({
-      where: { pageId: { in: pageIds } },
-      orderBy: { createdAt: "desc" },
-    }),
+  const [audits, history, progress] = await Promise.all([
+    latestAudits(project.id, [...idByKey.keys()]),
+    homepageKey ? auditHistory(project.id, homepageKey) : [],
     readPerfProgress(prisma, project.id),
   ]);
 
@@ -53,26 +54,17 @@ export default async function ProjectPerformancePage({
       ? (lastIds[Math.min(progress.perfDone, lastIds.length - 1)] ?? null)
       : null;
 
-  const latestKeys = new Set<string>();
-  const views = audits
-    .filter((audit) => {
-      const key = `${audit.pageId}:${audit.strategy}`;
-      if (latestKeys.has(key)) return false;
-      latestKeys.add(key);
-      return true;
-    })
-    .map((audit) => toAuditView(audit, pathById.get(audit.pageId) ?? "/"));
-  const homepageHistory = homepage
-    ? audits
-        .filter((audit) => audit.pageId === homepage.id)
-        .map((audit) => ({
-          createdAt: audit.createdAt.toISOString(),
-          strategy: (audit.strategy === "desktop" ? "desktop" : "mobile") as "mobile" | "desktop",
-          performance: audit.performance,
-          lcp: audit.lcp,
-          cls: audit.cls,
-        }))
-    : [];
+  const views = audits.flatMap((audit) => {
+    const pageId = idByKey.get(audit.pageKey);
+    return pageId ? [toAuditView(audit, pathById.get(pageId) ?? "/", pageId)] : [];
+  });
+  const homepageHistory = history.map((point) => ({
+    createdAt: point.createdAt.toISOString(),
+    strategy: (point.strategy === "desktop" ? "desktop" : "mobile") as "mobile" | "desktop",
+    performance: point.performance,
+    lcp: point.lcp,
+    cls: point.cls,
+  }));
 
   const pages = [...project.pages]
     .sort((a, b) => {
@@ -85,6 +77,7 @@ export default async function ProjectPerformancePage({
       path: pagePath(page.finalUrl ?? page.url),
       title: page.title?.trim() ?? "",
       crawled: isCrawled(page),
+      pageType: page.pageType,
     }));
 
   return (
@@ -102,6 +95,7 @@ export default async function ProjectPerformancePage({
         audits={views}
         history={homepageHistory}
         suggestedIds={suggestedIds}
+        lastRunIds={lastIds}
         initialSelected={initialSelected}
         active={active}
         runningPageId={runningPageId}

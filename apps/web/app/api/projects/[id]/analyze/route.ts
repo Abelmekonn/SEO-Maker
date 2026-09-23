@@ -3,6 +3,7 @@ import { AI_PAGE_FEATURES, type AiPageFeature } from "@seo-maker/core/queue";
 import { prisma } from "@seo-maker/db";
 import { aiConfigured } from "@/lib/ai-results";
 import { getAiUsage } from "@/lib/ai-usage";
+import { pageKeyIndex } from "@/lib/page-results";
 import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { enqueueAiPageAnalysis, getAiQueueJobs } from "@/lib/queue";
@@ -90,16 +91,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const pageIds = candidates.map((page) => page.id);
+  const keys = pageKeyIndex(candidates);
   const [issues, explained, usage] = await Promise.all([
     prisma.pageIssue.findMany({
       where: { pageId: { in: pageIds } },
       select: { pageId: true, severity: true },
     }),
+    // By page URL. Only a result written after this crawl fetched the page
+    // counts as done: one from an earlier crawl is refreshed by the batch
+    // (free when the page is unchanged, the AI cache answers it).
     next
-      ? prisma.aiResult.findMany({
-          where: { pageId: { in: pageIds }, feature: "page-recommendation", status: "ok" },
-          distinct: ["pageId"],
-          select: { pageId: true },
+      ? prisma.aiResult.groupBy({
+          by: ["pageKey"],
+          where: {
+            projectId: project.id,
+            pageKey: { in: [...keys.idByKey.keys()] },
+            feature: "page-recommendation",
+            status: "ok",
+          },
+          _max: { createdAt: true },
         })
       : [],
     getAiUsage(),
@@ -128,7 +138,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       message: `A batch is already running (${queued.length} ${queued.length === 1 ? "page" : "pages"} left). Progress is shown here.`,
     });
   }
-  const done = new Set(explained.map((row) => row.pageId));
+  const createdById = new Map(candidates.map((page) => [page.id, page.createdAt]));
+  const done = new Set(
+    explained.flatMap((row) => {
+      const pageId = row.pageKey ? keys.idByKey.get(row.pageKey) : undefined;
+      const at = row._max.createdAt;
+      const fetched = pageId ? createdById.get(pageId) : undefined;
+      return pageId && at && fetched && at >= fetched ? [pageId] : [];
+    }),
+  );
 
   let targets = candidates.filter((page) => weight.has(page.id) || onDemand);
   const skippedQueued = targets.filter((page) => alreadyQueued.has(page.id)).length;

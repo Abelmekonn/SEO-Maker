@@ -53,9 +53,13 @@ export function buildInputHash(input: CacheKeyInput): string {
 
 export type CachedResult = {
   id: string;
+  projectId: string;
+  pageId: string | null;
   output: unknown;
   model: string;
   provider: string;
+  promptVersion: string;
+  knowledgeVersion: string | null;
   createdAt: Date;
 };
 
@@ -67,7 +71,17 @@ export async function findCachedResult(
   const row = await prisma.aiResult.findFirst({
     where: { inputHash, feature, status: "ok" },
     orderBy: { createdAt: "desc" },
-    select: { id: true, output: true, model: true, provider: true, createdAt: true },
+    select: {
+      id: true,
+      projectId: true,
+      pageId: true,
+      output: true,
+      model: true,
+      provider: true,
+      promptVersion: true,
+      knowledgeVersion: true,
+      createdAt: true,
+    },
   });
   return row ?? null;
 }

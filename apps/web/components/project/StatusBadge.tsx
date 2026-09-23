@@ -6,6 +6,7 @@ const labels: Record<string, string> = {
   analyzed: "Analyzed",
   completed: "Completed",
   failed: "Failed",
+  cancelled: "Stopped",
 };
 
 export function StatusBadge({ status }: { status: string }) {

@@ -86,6 +86,22 @@ export function normalizePageUrl(value: string): string | null {
   return `${parsed.origin}${pathname}${search ? `?${search}` : ""}`;
 }
 
+/**
+ * A page's identity across crawls: host without "www.", then path and query,
+ * from the normalized URL ("stripe.com", "stripe.com/pricing").
+ *
+ * Every crawl writes its own Page rows, so a result tied to a row id vanished
+ * from view at the next crawl. PageSpeed and AI results are looked up by this
+ * key instead. The scheme is dropped so an http to https move keeps them too.
+ *
+ * The migration that backfilled existing rows computes the same key in SQL:
+ * keep the two in step.
+ */
+export function pageKeyOf(url: string): string {
+  const normalized = normalizePageUrl(url) ?? url;
+  return normalized.replace(/^https?:\/\/(?:www\.)?/i, "").replace(/\/+(?=$|\?)/, "");
+}
+
 /** Resolves `href` against `base` and normalizes it. Null when unusable. */
 export function toAbsoluteUrl(href: string, base: string): string | null {
   const trimmed = href.trim();

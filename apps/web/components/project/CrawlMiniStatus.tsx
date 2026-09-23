@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2, CircleStop, Loader2 } from "lucide-react";
+import { StopCrawlCopy } from "@/components/project/CrawlProgressView";
+import { StopWorkButton } from "@/components/project/StopWorkButton";
 import type { CrawlProgress } from "@/lib/crawl-progress";
 
 /**
@@ -20,9 +22,10 @@ export function CrawlMiniStatus({ projectId }: { projectId: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [progress, setProgress] = useState<CrawlProgress | null>(null);
-  const [justFinished, setJustFinished] = useState(false);
+  const [justFinished, setJustFinished] = useState<"done" | "stopped" | null>(null);
   const [polling, setPolling] = useState(true);
   const wasRunning = useRef(false);
+  const wasStopping = useRef(false);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/projects/${projectId}/crawl`, { cache: "no-store" }).catch(() => null);
@@ -32,13 +35,15 @@ export function CrawlMiniStatus({ projectId }: { projectId: string }) {
     const active = next.state === "running" || next.state === "queued";
     if (active) {
       wasRunning.current = true;
+      wasStopping.current = next.stopping;
       setPolling(true);
     } else {
-      if (wasRunning.current && next.state === "done") {
+      if (wasRunning.current && (next.state === "done" || next.state === "cancelled")) {
         wasRunning.current = false;
-        setJustFinished(true);
+        // A stopped first crawl keeps its pages and reads as "done".
+        setJustFinished(next.state === "cancelled" || wasStopping.current ? "stopped" : "done");
         router.refresh();
-        window.setTimeout(() => setJustFinished(false), 5000);
+        window.setTimeout(() => setJustFinished(null), 5000);
       }
       setPolling(false);
     }
@@ -66,7 +71,16 @@ export function CrawlMiniStatus({ projectId }: { projectId: string }) {
   // The overview shows the full progress view instead.
   if (pathname === `/projects/${projectId}`) return null;
 
-  if (justFinished) {
+  if (justFinished === "stopped") {
+    return (
+      <div className="mb-4 flex items-center gap-2.5 rounded-xl bg-surface-soft px-4 py-2.5 text-sm text-body ring-1 ring-warn/30">
+        <CircleStop className="size-4 text-warn" aria-hidden />
+        <span aria-live="polite">Crawl stopped. Nothing more will be fetched.</span>
+      </div>
+    );
+  }
+
+  if (justFinished === "done") {
     return (
       <div className="mb-4 flex items-center gap-2.5 rounded-xl bg-surface-soft px-4 py-2.5 text-sm text-body ring-1 ring-good/30">
         <CheckCircle2 className="size-4 text-good" aria-hidden />
@@ -80,8 +94,9 @@ export function CrawlMiniStatus({ projectId }: { projectId: string }) {
   const processed = progress.done + progress.failedPages;
   const planned = progress.phase === "crawling" || progress.phase === "scoring";
   const pct = planned && progress.target ? Math.min(99, Math.round((processed / progress.target) * 100)) : null;
-  const text =
-    progress.state === "queued"
+  const text = progress.stopping
+    ? "Stopping the crawl"
+    : progress.state === "queued"
       ? progress.workerOnline
         ? "Crawl queued"
         : "Crawl waiting: no crawler worker is running"
@@ -98,12 +113,26 @@ export function CrawlMiniStatus({ projectId }: { projectId: string }) {
           <Loader2 className="size-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
           <span className="truncate">{text}</span>
         </p>
-        <Link
-          href={`/projects/${projectId}`}
-          className="font-mono text-[12px] text-body underline-offset-4 hover:text-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          View progress
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/projects/${projectId}`}
+            className="font-mono text-[12px] text-body underline-offset-4 hover:text-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            View progress
+          </Link>
+          {progress.phase !== "scoring" ? (
+            <StopWorkButton
+              endpoint={`/api/projects/${projectId}/crawl`}
+              noun="crawl"
+              size="compact"
+              stopping={progress.stopping}
+              title="Stop this crawl?"
+              onStopped={() => void load()}
+            >
+              <StopCrawlCopy processed={processed} hasPrevious={progress.hasPrevious} />
+            </StopWorkButton>
+          ) : null}
+        </div>
       </div>
       <div className="relative h-1 overflow-hidden rounded-full bg-canvas" aria-hidden>
         {pct != null ? (

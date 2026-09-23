@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   Check,
   CircleAlert,
+  CircleStop,
   FileSearch,
   Gauge,
   Globe,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { ScoreRing } from "@/components/project/ScoreRing";
+import { StopWorkButton } from "@/components/project/StopWorkButton";
 import type { CrawlPhase, CrawlProgress } from "@/lib/crawl-progress";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +55,7 @@ const ORDER: Record<CrawlPhase, number> = {
   scoring: 3,
   done: 4,
   failed: -1,
+  cancelled: -1,
 };
 
 export function CrawlProgressView({
@@ -81,6 +84,11 @@ export function CrawlProgressView({
       // A short moment to register "done" before the overview replaces this.
       setFinished(true);
       window.setTimeout(() => router.refresh(), 1400);
+    } else if (next.state === "cancelled" && sawRunning.current) {
+      // Stopped: the overview shows the previous results, or this view in
+      // its stopped state when there are none.
+      sawRunning.current = false;
+      router.refresh();
     }
   }, [projectId, router]);
 
@@ -106,6 +114,8 @@ export function CrawlProgressView({
   const pct = finished || phase === "done" ? 100 : planned && progress.target > 0 ? Math.min(99, Math.round((processed / progress.target) * 100)) : 0;
   const elapsed = now && progress.startedAt ? Math.max(0, Math.floor((now - Date.parse(progress.startedAt)) / 1000)) : null;
   const failed = progress.state === "failed";
+  const stopped = progress.state === "cancelled";
+  const live = progress.state === "running" || progress.state === "queued";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -117,7 +127,7 @@ export function CrawlProgressView({
           aria-hidden
           className={cn(
             "pointer-events-none absolute -top-44 -right-24 size-[520px] rounded-full blur-3xl",
-            failed ? "bg-bad/10" : "bg-primary/15 motion-safe:animate-pulse",
+            failed ? "bg-bad/10" : stopped ? "bg-warn/10" : "bg-primary/15 motion-safe:animate-pulse",
           )}
         />
 
@@ -142,14 +152,26 @@ export function CrawlProgressView({
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              {elapsed != null && !failed ? (
+            <div className="flex flex-wrap items-center gap-3">
+              {elapsed != null && live ? (
                 <span className="inline-flex items-center gap-1.5 font-mono text-[12px] tabular-nums text-body">
                   <Timer className="size-3.5" aria-hidden />
                   {formatDuration(elapsed)}
                 </span>
               ) : null}
-              <LiveBadge phase={phase} failed={failed} />
+              <LiveBadge phase={phase} failed={failed} stopped={stopped} stopping={progress.stopping} />
+              {live && !finished && phase !== "scoring" ? (
+                <StopWorkButton
+                  endpoint={`/api/projects/${projectId}/crawl`}
+                  noun="crawl"
+                  size="compact"
+                  stopping={progress.stopping}
+                  title="Stop this crawl?"
+                  onStopped={() => void load()}
+                >
+                  <StopCrawlCopy processed={processed} hasPrevious={progress.hasPrevious} />
+                </StopWorkButton>
+              ) : null}
             </div>
           </div>
 
@@ -158,6 +180,7 @@ export function CrawlProgressView({
               pct={pct}
               phase={phase}
               failed={failed}
+              stopped={stopped}
               processed={processed}
               target={progress.target}
               upTo={progress.targetIsCap}
@@ -171,9 +194,9 @@ export function CrawlProgressView({
                   className="font-display text-[30px] leading-[1.1] tracking-[-0.9px] text-ink sm:text-[40px]"
                   aria-live="polite"
                 >
-                  {title(phase, failed, hostname)}
+                  {title(phase, failed, hostname, stopped, progress.stopping)}
                 </h1>
-                <p className="max-w-2xl text-sm leading-6 text-body">{subtitle(progress, phase, failed)}</p>
+                <p className="max-w-2xl text-sm leading-6 text-body">{subtitle(progress, phase, failed, stopped)}</p>
               </div>
 
               <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -190,17 +213,17 @@ export function CrawlProgressView({
             </div>
           </div>
 
-          <Stepper phase={phase} failed={failed} progress={progress} />
+          {!stopped ? <Stepper phase={phase} failed={failed} progress={progress} /> : null}
 
           <div className="relative h-1.5 overflow-hidden rounded-full bg-canvas" aria-hidden>
             <span
               className={cn(
                 "absolute inset-y-0 left-0 rounded-full transition-[width] duration-700 ease-out",
-                failed ? "bg-bad" : phase === "done" ? "bg-good" : "bg-primary",
+                failed ? "bg-bad" : stopped ? "bg-warn" : phase === "done" ? "bg-good" : "bg-primary",
               )}
-              style={{ width: `${failed ? 100 : Math.max(pct, phase === "queued" ? 3 : 6)}%` }}
+              style={{ width: `${failed || stopped ? 100 : Math.max(pct, phase === "queued" ? 3 : 6)}%` }}
             />
-            {!failed && phase !== "done" ? (
+            {live && !progress.stopping && phase !== "done" ? (
               <span className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/25 to-transparent motion-safe:animate-progress-sheen motion-reduce:hidden" />
             ) : null}
           </div>
@@ -223,6 +246,16 @@ export function CrawlProgressView({
             {progress.hasPrevious ? (
               <p className="text-xs leading-5 text-muted-foreground">Your previous results are unchanged.</p>
             ) : null}
+          </div>
+          <RecrawlButton projectId={projectId} maxPages={progress.maxPages} appearance="primary" />
+        </section>
+      ) : null}
+
+      {stopped ? (
+        <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-warn/30">
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-sm font-medium text-ink">You stopped this crawl before any page was saved.</p>
+            <p className="text-sm leading-6 text-body">There are no results for this site yet. Crawl it when you are ready.</p>
           </div>
           <RecrawlButton projectId={projectId} maxPages={progress.maxPages} appearance="primary" />
         </section>
@@ -349,8 +382,10 @@ export function CrawlProgressView({
   );
 }
 
-function title(phase: CrawlPhase, failed: boolean, hostname: string) {
+function title(phase: CrawlPhase, failed: boolean, hostname: string, stopped: boolean, stopping: boolean) {
   if (failed) return "The crawl did not finish";
+  if (stopped) return "Crawl stopped";
+  if (stopping) return "Stopping the crawl";
   switch (phase) {
     case "queued":
       return "Waiting for the crawler";
@@ -366,8 +401,12 @@ function title(phase: CrawlPhase, failed: boolean, hostname: string) {
   }
 }
 
-function subtitle(progress: CrawlProgress, phase: CrawlPhase, failed: boolean) {
+function subtitle(progress: CrawlProgress, phase: CrawlPhase, failed: boolean, stopped: boolean) {
   if (failed) return "Nothing was lost. Start the crawl again when you are ready.";
+  if (stopped) return "Nothing more will be fetched.";
+  if (progress.stopping) {
+    return "Letting the requests already in flight settle. No new pages are fetched; this takes a few seconds.";
+  }
   switch (phase) {
     case "queued":
       return progress.waitingPosition && progress.waitingPosition > 1
@@ -385,7 +424,50 @@ function subtitle(progress: CrawlProgress, phase: CrawlPhase, failed: boolean) {
   }
 }
 
-function LiveBadge({ phase, failed }: { phase: CrawlPhase; failed: boolean }) {
+/** What stopping keeps and drops, for the confirmation. */
+export function StopCrawlCopy({ processed, hasPrevious }: { processed: number; hasPrevious: boolean }) {
+  const fetched = processed === 1 ? "The 1 page fetched so far is" : `The ${processed} pages fetched so far are`;
+  if (hasPrevious) {
+    return (
+      <p>
+        {processed > 0 ? `${fetched} dropped, and your` : "Nothing has been fetched yet. Your"} previous results stay
+        exactly as they are. You can crawl again any time.
+      </p>
+    );
+  }
+  return (
+    <p>
+      {processed > 0
+        ? `${fetched} scored and shown as a partial crawl.`
+        : "Nothing has been saved yet, so there will be no results to show."}{" "}
+      You can crawl again any time.
+    </p>
+  );
+}
+
+function LiveBadge({
+  phase,
+  failed,
+  stopped,
+  stopping,
+}: {
+  phase: CrawlPhase;
+  failed: boolean;
+  stopped: boolean;
+  stopping: boolean;
+}) {
+  if (stopped || stopping) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/15 px-2.5 py-1 font-mono text-[11px] text-warn">
+        {stopping ? (
+          <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />
+        ) : (
+          <CircleStop className="size-3" aria-hidden />
+        )}
+        {stopping ? "Stopping" : "Stopped"}
+      </span>
+    );
+  }
   if (failed) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-bad/15 px-2.5 py-1 font-mono text-[11px] text-bad">
@@ -417,6 +499,7 @@ function Ring({
   pct,
   phase,
   failed,
+  stopped,
   processed,
   target,
   upTo,
@@ -425,6 +508,7 @@ function Ring({
   pct: number;
   phase: CrawlPhase;
   failed: boolean;
+  stopped: boolean;
   processed: number;
   target: number;
   /** The target is the page limit, not a known count. */
@@ -435,7 +519,7 @@ function Ring({
   const stroke = 12;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const indeterminate = !planned && !failed;
+  const indeterminate = !planned && !failed && !stopped;
 
   return (
     <div
@@ -461,7 +545,7 @@ function Ring({
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
           className={cn(
             "transition-[stroke-dashoffset] duration-700 ease-out",
-            failed ? "stroke-bad" : phase === "done" ? "stroke-good" : "stroke-primary",
+            failed ? "stroke-bad" : stopped ? "stroke-warn" : phase === "done" ? "stroke-good" : "stroke-primary",
           )}
         />
       </svg>
@@ -470,6 +554,8 @@ function Ring({
           <Check className="size-12 text-good motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:duration-500" strokeWidth={2.5} aria-hidden />
         ) : failed ? (
           <CircleAlert className="size-11 text-bad" aria-hidden />
+        ) : stopped ? (
+          <CircleStop className="size-11 text-warn" aria-hidden />
         ) : indeterminate ? (
           <Radar className="size-9 text-primary" aria-hidden />
         ) : (

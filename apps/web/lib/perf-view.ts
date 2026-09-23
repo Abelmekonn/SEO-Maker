@@ -36,6 +36,7 @@ export type PerfPageView = {
   path: string;
   title: string;
   crawled: boolean;
+  pageType: string | null;
 };
 
 export type PerfHistoryPoint = {
@@ -46,14 +47,16 @@ export type PerfHistoryPoint = {
   cls: number | null;
 };
 
+/** `pageId` is the page on screen: results are stored by URL and may come from an earlier crawl's row. */
 export function toAuditView(
   audit: PerformanceAudit,
   path: string,
+  pageId: string,
 ): PerfAuditView {
   const extra = extraMetrics(audit.rawData);
   return {
     id: audit.id,
-    pageId: audit.pageId,
+    pageId,
     path,
     strategy: audit.strategy === "desktop" ? "desktop" : "mobile",
     createdAt: audit.createdAt.toISOString(),

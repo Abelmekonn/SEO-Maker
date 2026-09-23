@@ -8,6 +8,7 @@ import {
   CRAWL_HOMEPAGE_JOB,
   CRAWL_QUEUE,
   RUN_PERFORMANCE_JOB,
+  aiStopKey,
   type AiPageAnalyzeJob,
   type CompetitorAnalyzeOneJob,
   type CompetitorDiscoverJob,
@@ -150,6 +151,8 @@ export type AiQueueJob = {
   features: string[] | null;
   /** 1-based place in the whole AI queue, across projects. Active jobs are 0. */
   position: number;
+  /** When the job was queued, epoch ms. */
+  queuedAt: number;
 };
 
 /**
@@ -167,7 +170,14 @@ export async function getAiQueueJobs(projectId: string): Promise<AiQueueJob[]> {
   const jobs: AiQueueJob[] = [];
   for (const job of active) {
     if (job?.data?.projectId === projectId) {
-      jobs.push({ jobId: String(job.id), pageId: job.data.pageId, state: "active", features: job.data.features ?? null, position: 0 });
+      jobs.push({
+        jobId: String(job.id),
+        pageId: job.data.pageId,
+        state: "active",
+        features: job.data.features ?? null,
+        position: 0,
+        queuedAt: job.timestamp,
+      });
     }
   }
   waiting.forEach((job, index) => {
@@ -178,6 +188,7 @@ export async function getAiQueueJobs(projectId: string): Promise<AiQueueJob[]> {
         state: "waiting",
         features: job.data.features ?? null,
         position: index + 1,
+        queuedAt: job.timestamp,
       });
     }
   });
@@ -202,22 +213,74 @@ export async function getCrawlQueueState(projectId: string): Promise<{
   return { workerOnline: workers > 0, waitingPosition: index === -1 ? null : index + 1 };
 }
 
+const NOT_STARTED = ["waiting", "prioritized", "delayed", "paused"] as const;
+
+/** Removes jobs that have not started yet and match, from one queue. */
+async function removeWaiting<T>(queue: Queue<T>, match: (name: string, data: T) => boolean): Promise<number> {
+  const jobs = await queue.getJobs([...NOT_STARTED], 0, 999);
+  let removed = 0;
+  for (const job of jobs) {
+    if (job?.data && match(job.name, job.data)) {
+      await job.remove().catch(() => undefined);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+function forProject(projectId: string) {
+  return (_name: string, data: unknown) =>
+    typeof data === "object" && data !== null && "projectId" in data && data.projectId === projectId;
+}
+
 /**
  * Removes a project's jobs that have not started, from every queue, so a
  * deleted site is not crawled or analysed afterwards. A job already running
  * finds its project gone and stops on its own.
  */
 export async function removeProjectJobs(projectId: string): Promise<number> {
-  const queues = [getCrawlQueue(), getCompetitorQueue(), getAiPageQueue()];
+  const queues = [getCrawlQueue(), getCompetitorQueue(), getAiPageQueue()] as Queue<unknown>[];
   let removed = 0;
   for (const queue of queues) {
-    const jobs = await queue.getJobs(["waiting", "prioritized", "delayed", "paused"], 0, 999);
-    for (const job of jobs) {
-      if (job?.data && "projectId" in job.data && job.data.projectId === projectId) {
-        await job.remove().catch(() => undefined);
-        removed += 1;
-      }
-    }
+    removed += await removeWaiting(queue, forProject(projectId));
   }
   return removed;
+}
+
+/** Takes a queued crawl that has not started off the queue. */
+export async function removeQueuedCrawl(projectId: string): Promise<number> {
+  const mine = forProject(projectId);
+  return removeWaiting(getCrawlQueue(), (name, data) => name === CRAWL_HOMEPAGE_JOB && mine(name, data));
+}
+
+/** Takes a queued PageSpeed run that has not started off the queue. */
+export async function removeQueuedPerformance(projectId: string): Promise<number> {
+  const mine = forProject(projectId);
+  return removeWaiting(getCrawlQueue(), (name, data) => name === RUN_PERFORMANCE_JOB && mine(name, data));
+}
+
+/** When the user last pressed Stop on this project's AI work, epoch ms. */
+export async function getAiStopAt(projectId: string): Promise<number | null> {
+  const value = Number(await getConnection().get(aiStopKey(projectId)));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Whether the worker is running this project's PageSpeed job right now. */
+export async function performanceJobActive(projectId: string): Promise<boolean> {
+  const active = await getCrawlQueue().getJobs(["active"]);
+  return active.some((job) => job?.name === RUN_PERFORMANCE_JOB && job.data?.projectId === projectId);
+}
+
+/**
+ * Stops a project's AI work: pages waiting are taken off the queue, and the
+ * page being analysed stops at its next check (the worker polls the stop key).
+ * Work queued after this call is unaffected.
+ */
+export async function stopAiWork(projectId: string): Promise<{ removed: number; running: number }> {
+  const connection = getConnection();
+  // An hour outlives any job queued before the stop.
+  await connection.set(aiStopKey(projectId), String(Date.now()), "EX", 3600);
+  const removed = await removeWaiting(getAiPageQueue(), forProject(projectId));
+  const running = (await getAiPageQueue().getJobs(["active"])).filter((job) => job?.data?.projectId === projectId).length;
+  return { removed, running };
 }

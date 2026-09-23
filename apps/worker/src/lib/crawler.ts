@@ -173,7 +173,17 @@ export type CrawlHooks = {
     /** Page types the user set, by URL path. They win over classification. */
     overrides?: Record<string, string>;
   };
+  /** Aborts the crawl when the user stops it. */
+  signal?: AbortSignal;
 };
+
+/** Thrown when a crawl ends because the user stopped it, not because it broke. */
+export class CrawlStoppedError extends Error {
+  constructor() {
+    super("The crawl was stopped.");
+    this.name = "CrawlStoppedError";
+  }
+}
 
 export async function crawlSite(
   startUrl: string,
@@ -195,10 +205,17 @@ export async function crawlSite(
   const origin = entry.url.origin;
   const siteHost = hostKey(entry.url.hostname);
 
+  const signal = hooks?.signal;
+  const throwIfStopped = () => {
+    if (signal?.aborted) throw new CrawlStoppedError();
+  };
+
   await hooks?.onPhase?.("discovering");
   const robots = await readRobots(origin);
+  throwIfStopped();
   const group = robots.parsed ? groupFor(robots.parsed) : null;
   const sitemap = await readSitemaps(robots.parsed?.sitemaps ?? [], origin, siteHost);
+  throwIfStopped();
 
   const plan = planSeeds({
     start: normalizedStart,
@@ -295,6 +312,13 @@ export async function crawlSite(
 
       async requestHandler({ $, request, response, enqueueLinks, crawler: self }) {
         requests += 1;
+
+        // Requests already in flight when the user stopped the crawl finish
+        // without being saved, so the count shown at the stop is the count kept.
+        if (signal?.aborted) {
+          await self.autoscaledPool?.abort();
+          return;
+        }
 
         const requestedUrl = normalizePageUrl(request.url) ?? request.url;
         const loadedUrl = normalizePageUrl(request.loadedUrl ?? request.url) ?? requestedUrl;
@@ -492,6 +516,9 @@ export async function crawlSite(
        */
       async failedRequestHandler({ request, response }, error) {
         requests += 1;
+        if (signal?.aborted) {
+          return;
+        }
         const url = normalizePageUrl(request.url) ?? request.url;
         if (seen.has(url)) {
           return;
@@ -532,8 +559,19 @@ export async function crawlSite(
     crawlDelay,
     concurrency: crawlDelay ? 1 : crawlConcurrency(),
   });
+  throwIfStopped();
   await hooks?.onPhase?.("crawling");
-  await crawler.run(plan.seeds.map((url) => ({ url, uniqueKey: url })));
+
+  // Stopping aborts the pool: no new requests start, and run() returns once
+  // the ones in flight settle.
+  const onStop = () => void crawler.autoscaledPool?.abort();
+  signal?.addEventListener("abort", onStop, { once: true });
+  try {
+    await crawler.run(plan.seeds.map((url) => ({ url, uniqueKey: url })));
+  } finally {
+    signal?.removeEventListener("abort", onStop);
+  }
+  throwIfStopped();
 
   if (pages.length === 0 && failures.length === 0) {
     throw new Error(`Could not fetch ${normalizedStart}`);

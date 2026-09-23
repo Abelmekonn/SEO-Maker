@@ -6,6 +6,7 @@ import {
   CRAWL_HOMEPAGE_JOB,
   CRAWL_QUEUE,
   RUN_PERFORMANCE_JOB,
+  aiStopKey,
   type AiPageAnalyzeJob,
   type CompetitorAnalyzeOneJob,
 } from "@seo-maker/core/queue";
@@ -15,6 +16,7 @@ import { aiAnalyzePageJob } from "./jobs/ai/analyze-page.js";
 import { competitorAnalyzeOneJob } from "./jobs/competitors/analyze-one.js";
 import { crawlHomepageJob, recoverInterruptedCrawls, type CrawlHomepageJob } from "./jobs/crawl-site";
 import { runPerformanceJob, type RunPerformanceJob } from "./jobs/run-performance";
+import { watchForStop } from "./lib/stop-signal";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6380";
 
@@ -97,9 +99,25 @@ const aiPageWorker = new Worker<AiPageAnalyzeJob>(
   async (job) => {
     if (job.name === AI_PAGE_ANALYZE_JOB) {
       const payload = job.data;
-      console.log(`AI page ${job.id}: ${payload.pageId} (${payload.mode})`);
-      await aiAnalyzePageJob(payload);
-      console.log(`AI page ${job.id}: done`);
+      // Stop applies to work queued before it was pressed, never to work
+      // queued after: the key holds when Stop was pressed, the job when it was
+      // queued.
+      const stopRequested = async () => {
+        const at = Number(await connection.get(aiStopKey(payload.projectId)));
+        return Number.isFinite(at) && at >= job.timestamp;
+      };
+      if (await stopRequested().catch(() => false)) {
+        console.log(`AI page ${job.id}: skipped, stopped by the user`);
+        return;
+      }
+      const stop = watchForStop(stopRequested);
+      try {
+        console.log(`AI page ${job.id}: ${payload.pageId} (${payload.mode})`);
+        await aiAnalyzePageJob(payload, stop.signal);
+        console.log(`AI page ${job.id}: ${stop.signal.aborted ? "stopped by the user" : "done"}`);
+      } finally {
+        stop.dispose();
+      }
       return;
     }
 

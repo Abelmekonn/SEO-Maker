@@ -6,7 +6,8 @@ import {
   toPageIssues,
 } from "@seo-maker/core/scoring";
 import { type Prisma, prisma } from "@seo-maker/db";
-import { type PageAudit, type PageFailure, crawlSite } from "../lib/crawler.js";
+import { type PageAudit, type PageFailure, CrawlStoppedError, crawlSite } from "../lib/crawler.js";
+import { watchForStop } from "../lib/stop-signal.js";
 
 export type CrawlHomepageJob = {
   projectId: string;
@@ -53,8 +54,28 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
   let saved = 0;
   let failed = 0;
 
+  // The Stop button marks this row "cancelling". A missing row means the site
+  // was deleted mid-crawl, which is a stop too.
+  const stop = watchForStop(async () => {
+    const row = await prisma.crawl.findUnique({ where: { id: crawl.id }, select: { status: true } });
+    return !row || row.status === "cancelling";
+  }, 1000);
+
+  // Crawlee's pool abort (on a stop, or at the page limit) returns without
+  // waiting for requests in flight, so a save can still land afterwards.
+  // Every save is tracked and awaited before the crawl is closed out, and none
+  // starts once the user has stopped the crawl.
+  const inFlight = new Set<Promise<void>>();
+  const track = (work: Promise<void>) => {
+    inFlight.add(work);
+    void work.finally(() => inFlight.delete(work)).catch(() => undefined);
+    return work;
+  };
+  const settle = () => Promise.allSettled([...inFlight]);
+
   try {
     const result = await crawlSite(url, maxPages, {
+      signal: stop.signal,
       classify: classifyContext(project),
       onPhase: async (phase) => {
         await prisma.crawl.update({ where: { id: crawl.id }, data: { phase } });
@@ -70,16 +91,19 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
         });
       },
       onPage: async (audit) => {
-        await savePage(projectId, crawl.id, audit);
+        if (stop.signal.aborted) return;
+        await track(savePage(projectId, crawl.id, audit));
         saved += 1;
         console.log(`[crawl ${crawl.id}] ${saved}/${maxPages} ${audit.url}`);
       },
       onFailure: async (failure) => {
-        await saveFailure(projectId, crawl.id, failure);
+        if (stop.signal.aborted) return;
+        await track(saveFailure(projectId, crawl.id, failure));
         failed += 1;
         console.warn(`[crawl ${crawl.id}] failed ${failure.url} (${failure.errorType})`);
       },
     });
+    await settle();
 
     await prisma.crawl.update({
       where: { id: crawl.id },
@@ -108,6 +132,17 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
     await finishCrawl(projectId, crawl.id);
     await pruneHistory(projectId, crawl.id);
   } catch (error) {
+    if (error instanceof CrawlStoppedError || stop.signal.aborted) {
+      // Returned, not thrown: a stop is the outcome the user asked for, and a
+      // thrown error would make BullMQ run the crawl again.
+      await settle();
+      await stopCrawl({ projectId, crawlId: crawl.id, previousCrawlId, saved, failed }).catch((stopError) => {
+        console.warn(`[crawl ${crawl.id}] could not record the stop:`, stopError);
+      });
+      console.log(`[crawl ${crawl.id}] stopped by the user after ${saved} pages`);
+      return;
+    }
+    await settle();
     await prisma.page.updateMany({
       where: { crawlId: crawl.id, status: { in: ["pending", "crawling"] } },
       data: { status: "failed", errorType: "crawl-aborted" },
@@ -132,7 +167,50 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
         : { status: saved > 0 ? "analyzed" : "failed", latestCrawlId: crawl.id },
     });
     throw error;
+  } finally {
+    stop.dispose();
   }
+}
+
+/**
+ * Records a crawl the user stopped.
+ *
+ * A stopped re-crawl is dropped: the last complete crawl stays the one every
+ * screen shows, exactly as when a re-crawl fails. A stopped first crawl has
+ * nothing to fall back to, so the pages it did fetch are scored and shown,
+ * marked as a partial crawl.
+ */
+async function stopCrawl({
+  projectId,
+  crawlId,
+  previousCrawlId,
+  saved,
+  failed,
+}: {
+  projectId: string;
+  crawlId: string;
+  previousCrawlId: string | null;
+  saved: number;
+  failed: number;
+}) {
+  const exists = await prisma.crawl.findUnique({ where: { id: crawlId }, select: { id: true } });
+  if (!exists) return; // The site was deleted.
+
+  if (!previousCrawlId && saved > 0) {
+    await prisma.crawl.update({ where: { id: crawlId }, data: { crawled: saved, failed } });
+    await finishCrawl(projectId, crawlId, { stopped: true });
+    await pruneHistory(projectId, crawlId);
+    return;
+  }
+
+  await prisma.crawl.update({
+    where: { id: crawlId },
+    data: { status: "cancelled", phase: "cancelled", finishedAt: new Date(), crawled: saved, failed },
+  });
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { status: previousCrawlId ? "analyzed" : "cancelled" },
+  });
 }
 
 /**
@@ -143,7 +221,7 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
  * them means a stored issue can never disagree with a displayed one, and gives
  * the AI layer a record to explain instead of re-deriving.
  */
-async function finishCrawl(projectId: string, crawlId: string) {
+async function finishCrawl(projectId: string, crawlId: string, options: { stopped?: boolean } = {}) {
   const pages = await prisma.page.findMany({ where: { crawlId } });
 
   const issueRows: Prisma.PageIssueCreateManyInput[] = [];
@@ -164,8 +242,10 @@ async function finishCrawl(projectId: string, crawlId: string) {
   await prisma.crawl.update({
     where: { id: crawlId },
     data: {
-      status: analyzed === 0 && failed > 0 ? "failed" : "completed",
-      phase: "done",
+      // A stopped first crawl keeps "cancelled" so it reads as partial, and
+      // comparisons never set it against a complete crawl.
+      status: options.stopped ? "cancelled" : analyzed === 0 && failed > 0 ? "failed" : "completed",
+      phase: options.stopped ? "cancelled" : "done",
       finishedAt: new Date(),
       analyzed,
       failed,
@@ -330,13 +410,18 @@ function classifyContext(project: {
  */
 export async function recoverInterruptedCrawls(): Promise<number> {
   const stuck = await prisma.crawl.findMany({
-    where: { status: { in: ["crawling", "analyzing", "pending"] } },
+    where: { status: { in: ["crawling", "analyzing", "pending", "cancelling"] } },
     select: { id: true, projectId: true },
   });
   if (stuck.length === 0) return 0;
 
+  // A crawl the user was stopping when the worker went down is stopped.
   await prisma.crawl.updateMany({
-    where: { id: { in: stuck.map((row) => row.id) } },
+    where: { id: { in: stuck.map((row) => row.id) }, status: "cancelling" },
+    data: { status: "cancelled", phase: "cancelled", finishedAt: new Date() },
+  });
+  await prisma.crawl.updateMany({
+    where: { id: { in: stuck.map((row) => row.id) }, status: { not: "cancelled" } },
     data: {
       status: "failed",
       phase: "failed",

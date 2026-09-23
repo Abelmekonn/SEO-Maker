@@ -245,6 +245,23 @@ describe("rate-limit waits", () => {
     expect(waits[0]).toBeLessThan(42_000);
   });
 
+  it("stops waiting and does not call again when the caller cancels", async () => {
+    const controller = new AbortController();
+    const provider = fakeProvider(async () => {
+      throw new AiError("rate-limited", "limited", { status: 429, retryAfterMs: 40_000 });
+    });
+
+    const pending = generateStructured(
+      { ...request(), signal: controller.signal },
+      // A wait that never ends on its own: only the cancellation can end it.
+      { provider, sleep: () => new Promise<void>(() => {}) },
+    );
+    setTimeout(() => controller.abort(), 10);
+
+    await expect(pending).rejects.toMatchObject({ kind: "cancelled" });
+    expect(provider.calls).toBe(1);
+  });
+
   it("fails straight away when the wait is longer than a job should hold a worker", async () => {
     const provider = fakeProvider(async () => {
       throw new AiError("rate-limited", "daily quota", { status: 429, retryAfterMs: 3_600_000 });

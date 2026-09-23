@@ -2,7 +2,8 @@ import type { PerformanceAudit } from "@seo-maker/db";
 
 export type Rating = "good" | "warn" | "bad" | "none";
 
-export const PERF_ACTIVE = new Set(["queued", "running"]);
+/** PageSpeed states with a job still on the worker. "cancelling" is a stop in progress. */
+export const PERF_ACTIVE = new Set(["queued", "running", "cancelling"]);
 
 export function latestStrategy(
   audits: PerformanceAudit[],

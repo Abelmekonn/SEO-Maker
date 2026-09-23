@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-const LIVE = new Set(["pending", "crawling", "queued", "running"]);
+const LIVE = new Set(["pending", "crawling", "queued", "running", "cancelling"]);
 
 /**
  * Re-fetches the current route every couple of seconds while `status`

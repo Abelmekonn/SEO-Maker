@@ -12,11 +12,21 @@ import { pagePath } from "@/lib/site-url";
  * so nothing else on screen changes mid-crawl.
  */
 
-export type CrawlPhase = "queued" | "starting" | "discovering" | "crawling" | "scoring" | "done" | "failed";
+export type CrawlPhase =
+  | "queued"
+  | "starting"
+  | "discovering"
+  | "crawling"
+  | "scoring"
+  | "done"
+  | "failed"
+  | "cancelled";
 
 export type CrawlProgress = {
-  state: "idle" | "queued" | "running" | "done" | "failed";
+  state: "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
   phase: CrawlPhase;
+  /** The user pressed Stop and the worker is winding the crawl down. */
+  stopping: boolean;
   crawlId: string | null;
   mode: string;
   maxPages: number;
@@ -60,7 +70,7 @@ export type CrawlProgress = {
   hasPrevious: boolean;
 };
 
-const RUNNING = new Set(["crawling", "analyzing", "pending"]);
+const RUNNING = new Set(["crawling", "analyzing", "pending", "cancelling"]);
 
 export async function getCrawlProgress(project: {
   id: string;
@@ -79,10 +89,34 @@ export async function getCrawlProgress(project: {
   const queued = !running && project.status === "pending";
   const recentFailure =
     latest?.status === "failed" && latest.id !== project.latestCrawlId && !running ? latest : null;
+  // A stopped crawl that is not the one on screen: a stopped re-crawl, or a
+  // first crawl stopped before it saved a page. A stopped first crawl that did
+  // save pages becomes the latest crawl and reads as "done", partial.
+  const recentStop =
+    latest?.status === "cancelled" && latest.id !== project.latestCrawlId && !running ? latest : null;
 
   const base: CrawlProgress = {
-    state: running ? "running" : queued ? "queued" : recentFailure ? "failed" : latest ? "done" : "idle",
-    phase: running ? ((running.phase as CrawlPhase) ?? "starting") : queued ? "queued" : recentFailure ? "failed" : "done",
+    state: running
+      ? "running"
+      : queued
+        ? "queued"
+        : recentFailure
+          ? "failed"
+          : recentStop
+            ? "cancelled"
+            : latest
+              ? "done"
+              : "idle",
+    phase: running
+      ? ((running.phase as CrawlPhase) ?? "starting")
+      : queued
+        ? "queued"
+        : recentFailure
+          ? "failed"
+          : recentStop
+            ? "cancelled"
+            : "done",
+    stopping: running?.status === "cancelling",
     crawlId: (running ?? latest)?.id ?? null,
     mode: project.analysisMode,
     maxPages: running?.maxPages ?? project.maxPages,
@@ -108,7 +142,7 @@ export async function getCrawlProgress(project: {
   base.targetIsCap = !(seeds > 0 && seeds >= cap);
   base.target = base.targetIsCap ? cap : seeds;
 
-  const crawl = running ?? recentFailure;
+  const crawl = running ?? recentFailure ?? recentStop;
   if (!crawl) {
     return base;
   }

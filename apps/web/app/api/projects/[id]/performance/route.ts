@@ -4,7 +4,7 @@ import { resolvePerfTargets } from "@/lib/perf-scope";
 import { getAccountForUser } from "@/lib/plan";
 import { PERF_ACTIVE } from "@/lib/performance";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
-import { enqueuePerformanceAudit } from "@/lib/queue";
+import { enqueuePerformanceAudit, performanceJobActive, removeQueuedPerformance } from "@/lib/queue";
 
 export async function POST(
   request: Request,
@@ -27,7 +27,12 @@ export async function POST(
 
   if (PERF_ACTIVE.has(project.perfStatus)) {
     return NextResponse.json(
-      { error: "A PageSpeed run is already in progress." },
+      {
+        error:
+          project.perfStatus === "cancelling"
+            ? "The last PageSpeed run is still stopping. Try again in a few seconds."
+            : "A PageSpeed run is already in progress.",
+      },
       { status: 409 },
     );
   }
@@ -83,4 +88,54 @@ export async function POST(
   }
 
   return NextResponse.json({ ok: true, total: targets.length });
+}
+
+/**
+ * Stops the project's PageSpeed run.
+ *
+ * Queued: the job comes off the queue. Running: the project is marked
+ * "cancelling"; the worker polls for it, cancels the Lighthouse call in flight
+ * and keeps every page it already measured.
+ */
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Sign in to stop PageSpeed." }, { status: 401 });
+  }
+  const { id } = await params;
+  const project = await prisma.project.findFirst({ where: { id, userId }, select: { id: true, perfStatus: true } });
+  if (!project) {
+    return NextResponse.json({ error: "Project not found." }, { status: 404 });
+  }
+
+  if (project.perfStatus === "queued") {
+    let removed = 0;
+    try {
+      removed = await removeQueuedPerformance(project.id);
+    } catch {
+      return NextResponse.json({ error: "Queue is not running. Start Redis and the worker." }, { status: 503 });
+    }
+    if (removed > 0) {
+      await prisma.project.updateMany({
+        where: { id: project.id, perfStatus: "queued" },
+        data: { perfStatus: "cancelled" },
+      });
+      return NextResponse.json({ ok: true, state: "stopped" });
+    }
+    // Not waiting any more: the worker has it, or the job was lost (Redis
+    // restarted). A lost job has no worker to acknowledge a stop.
+    if (!(await performanceJobActive(project.id).catch(() => true))) {
+      await prisma.project.update({ where: { id: project.id }, data: { perfStatus: "cancelled" } });
+      return NextResponse.json({ ok: true, state: "stopped" });
+    }
+  }
+
+  const { count } = await prisma.project.updateMany({
+    where: { id: project.id, perfStatus: { in: ["queued", "running", "cancelling"] } },
+    data: { perfStatus: "cancelling" },
+  });
+  if (count === 0) {
+    return NextResponse.json({ error: "No PageSpeed run is in progress." }, { status: 409 });
+  }
+  return NextResponse.json({ ok: true, state: "stopping" });
 }
