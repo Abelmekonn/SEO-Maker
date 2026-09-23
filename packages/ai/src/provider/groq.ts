@@ -123,8 +123,25 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
 function providerError(status: number, body: string): AiError {
   const detail = body.slice(0, 500);
-  if (status === 401 || status === 403) {
+
+  if (status === 401) {
     return new AiError("auth", "The AI provider rejected the API key.", { status, detail });
+  }
+
+  // 403 is not the same as 401 and must not be reported as a key problem.
+  // Groq returns 403 "Access denied. Please check your network settings." for
+  // requests from blocked regions and datacenter/VPN IP ranges, with a valid
+  // key. Saying "rejected the API key" there sends the user hunting for a fault
+  // that is not in their configuration.
+  if (status === 403) {
+    const blocked = /network settings|access denied|not available in your/i.test(body);
+    return new AiError(
+      "auth",
+      blocked
+        ? "The AI provider refused the request from this network. This usually means a blocked region, VPN or datacenter IP rather than a bad key."
+        : "The AI provider denied access to this resource. The key may lack permission for this model.",
+      { status, detail },
+    );
   }
   if (status === 429) {
     return new AiError("rate-limited", "The AI provider rate-limited the request.", { status, detail });

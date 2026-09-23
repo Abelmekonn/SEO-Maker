@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { generateStructured, parseAndValidate } from "./index";
+import { generateStructured, OpenAiCompatibleProvider, parseAndValidate } from "./index";
 import { AiError, type AiProvider, type StructuredRequest } from "./types";
 
 const schema = z.object({ answer: z.string(), score: z.number() });
@@ -142,5 +142,62 @@ describe("generateStructured retries", () => {
     await expect(
       generateStructured(request(), { provider, sleep: noSleep, maxRetries: 0 }),
     ).rejects.toMatchObject({ kind: "provider-error" });
+  });
+});
+
+describe("provider error classification", () => {
+  const config = {
+    provider: "groq",
+    model: "test-model",
+    apiKey: "test-key",
+    baseUrl: "https://example.invalid/v1",
+    timeoutMs: 5_000,
+    maxRetries: 0,
+    enabled: true,
+  };
+
+  async function callWith(status: number, body: string) {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(body, { status, statusText: String(status) })) as typeof fetch;
+    try {
+      await new OpenAiCompatibleProvider(config).generateStructured(request());
+      throw new Error("should have thrown");
+    } catch (error) {
+      return error as InstanceType<typeof AiError>;
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  it("reports a 401 as a rejected key", async () => {
+    const error = await callWith(401, '{"error":{"message":"Invalid API Key"}}');
+    expect(error.kind).toBe("auth");
+    expect(error.message).toMatch(/rejected the API key/i);
+    expect(error.retryable).toBe(false);
+  });
+
+  it("reports a 403 network block as a network problem, not a key problem", async () => {
+    // Groq answers this way for VPN and datacenter IPs with a perfectly valid
+    // key. Blaming the key sends the user after a fault they do not have.
+    const error = await callWith(
+      403,
+      '{"error":{"message":"Access denied. Please check your network settings."}}',
+    );
+    expect(error.kind).toBe("auth");
+    expect(error.message).toMatch(/network/i);
+    expect(error.message).not.toMatch(/rejected the API key/i);
+    expect(error.retryable).toBe(false);
+  });
+
+  it("reports a plain 403 as a permission problem", async () => {
+    const error = await callWith(403, '{"error":{"message":"model not permitted"}}');
+    expect(error.message).toMatch(/permission/i);
+  });
+
+  it("reports a 429 as rate limiting, and retryable", async () => {
+    const error = await callWith(429, '{"error":{"message":"slow down"}}');
+    expect(error.kind).toBe("rate-limited");
+    expect(error.retryable).toBe(true);
   });
 });
