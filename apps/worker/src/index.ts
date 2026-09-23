@@ -5,14 +5,18 @@ import {
   COMPETITOR_QUEUE,
   CRAWL_HOMEPAGE_JOB,
   CRAWL_QUEUE,
+  GEO_AUDIT_JOB,
+  GEO_QUEUE,
   RUN_PERFORMANCE_JOB,
   type AiPageAnalyzeJob,
   type CompetitorAnalyzeOneJob,
+  type GeoAuditJob,
 } from "@seo-maker/core/queue";
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
 import { aiAnalyzePageJob } from "./jobs/ai/analyze-page.js";
 import { competitorAnalyzeOneJob } from "./jobs/competitors/analyze-one.js";
+import { runGeoAuditJob } from "./jobs/geo/run-geo-audit.js";
 import { crawlHomepageJob, type CrawlHomepageJob } from "./jobs/crawl-site";
 import { runPerformanceJob, type RunPerformanceJob } from "./jobs/run-performance";
 
@@ -100,6 +104,33 @@ aiPageWorker.on("failed", (job, error) => {
   console.error(`AI page ${job?.id} failed:`, error);
 });
 
+/**
+ * GEO runs on its own queue rather than sharing the AI one.
+ *
+ * `ai-page` serves a single-page suggestion someone is waiting on: short lock,
+ * concurrency 2. A GEO audit walks the whole crawl, so sharing would park an
+ * interactive request behind a multi-minute batch.
+ */
+const geoWorker = new Worker<GeoAuditJob>(
+  GEO_QUEUE,
+  async (job) => {
+    if (job.name === GEO_AUDIT_JOB) {
+      const payload = job.data;
+      console.log(`GEO ${job.id}: ${payload.projectId} (${payload.mode}, ${payload.trigger})`);
+      await runGeoAuditJob(payload);
+      console.log(`GEO ${job.id}: done`);
+      return;
+    }
+
+    throw new Error(`Unknown job name: ${job.name}`);
+  },
+  { connection, concurrency: 1, lockDuration: 30 * 60 * 1000 },
+);
+
+geoWorker.on("failed", (job, error) => {
+  console.error(`GEO ${job?.id} failed:`, error);
+});
+
 console.log(
-  `Worker listening on ${CRAWL_QUEUE}, ${COMPETITOR_QUEUE} and ${AI_PAGE_QUEUE} (${redisUrl})`,
+  `Worker listening on ${CRAWL_QUEUE}, ${COMPETITOR_QUEUE}, ${AI_PAGE_QUEUE} and ${GEO_QUEUE} (${redisUrl})`,
 );

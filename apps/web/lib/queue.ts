@@ -5,11 +5,14 @@ import {
   COMPETITOR_QUEUE,
   CRAWL_HOMEPAGE_JOB,
   CRAWL_QUEUE,
+  GEO_AUDIT_JOB,
+  GEO_QUEUE,
   RUN_PERFORMANCE_JOB,
   type CompetitorAnalyzeOneJob,
   type CompetitorDiscoverJob,
   type CompetitorInsightsJob,
   type CrawlHomepageJob,
+  type GeoAuditJob,
   type PerfPageTarget,
   type RunPerformanceJob,
 } from "@seo-maker/core/queue";
@@ -23,6 +26,8 @@ export {
   COMPETITOR_QUEUE,
   CRAWL_HOMEPAGE_JOB,
   CRAWL_QUEUE,
+  GEO_AUDIT_JOB,
+  GEO_QUEUE,
   RUN_PERFORMANCE_JOB,
 };
 export type {
@@ -107,6 +112,32 @@ export async function enqueueCompetitorInsights(data: CompetitorInsightsJob) {
   await getCompetitorQueue().add(COMPETITOR_INSIGHTS_JOB, data, {
     attempts: 2,
     backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: 20,
+    removeOnFail: 20,
+  });
+}
+
+let geoQueue: Queue<GeoAuditJob> | null = null;
+
+function getGeoQueue() {
+  if (!geoQueue) {
+    geoQueue = new Queue<GeoAuditJob>(GEO_QUEUE, { connection: getConnection() });
+  }
+  return geoQueue;
+}
+
+/**
+ * Enqueues a GEO audit.
+ *
+ * `attempts: 1` for the same reason competitor discovery uses it: the run is
+ * long and, once the AI phases land, spends real tokens. A silent BullMQ retry
+ * would double-bill. The jobId collapses a crawl-completion chain and a manual
+ * click into one run rather than two writing the same project row.
+ */
+export async function enqueueGeoAudit(data: GeoAuditJob) {
+  await getGeoQueue().add(GEO_AUDIT_JOB, data, {
+    jobId: `geo:${data.projectId}:${data.crawlId ?? "latest"}`,
+    attempts: 1,
     removeOnComplete: 20,
     removeOnFail: 20,
   });

@@ -83,13 +83,17 @@ export function Sidebar({ plan }: { plan: PlanId }) {
       ]
     : [];
 
-  // Every entry is unbuilt today. Overview becomes a link when the AI Search
-  // readiness page ships; the rest follow their own stages.
   const aiSearchItems: NavItem[] = projectBase
     ? [
         // Not Hexagon: that already means the project Overview, and one glyph
         // should not stand for two different destinations.
-        { key: "ai-overview", label: "Overview", icon: Radar },
+        { key: "ai-overview", href: `${projectBase}/ai-search`, label: "Overview", icon: Radar, exact: true },
+        {
+          key: "ai-readiness",
+          href: `${projectBase}/ai-search/readiness`,
+          label: "AI Readiness",
+          icon: Gauge,
+        },
         { key: "ai-visibility", label: "AI Visibility", icon: Eye },
         { key: "ai-citations", label: "AI Citations", icon: Quote },
         { key: "ai-competitors", label: "AI Competitors", icon: Swords },
