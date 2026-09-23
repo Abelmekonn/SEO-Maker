@@ -1,36 +1,32 @@
 import type { ReactNode } from "react";
-import type { Page, PerformanceAudit, Project } from "@seo-maker/db";
+import type { Competitor, Crawl, Page, PerformanceAudit, Project } from "@seo-maker/db";
 import Link from "next/link";
 import {
   Activity,
   ArrowUp,
-  ArrowUpRight,
-  Calendar,
-  ChevronRight,
   CircleDot,
-  CirclePlus,
   Crosshair,
-  Gauge,
   Lightbulb,
   Sparkles,
   Swords,
-  UserRound,
   Workflow,
 } from "lucide-react";
-import {
-  DonutChart,
-  ScoreSpark,
-  TrendLines,
-} from "@/components/project/OverviewCharts";
+import { DonutChart, ScoreSpark, TrendLines } from "@/components/project/OverviewCharts";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
+import {
+  AiAssistantCard,
+  CompetitorCard,
+  KeyInsightsCard,
+  NextActions,
+  groupFindings,
+} from "@/components/project/OverviewInsights";
 import { OverviewPageTable } from "@/components/project/OverviewPageTable";
 import { OverviewProblems } from "@/components/project/OverviewProblems";
 import { LockedCard } from "@/components/project/PremiumGate";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { ScoreRing } from "@/components/project/ScoreRing";
 import { StatusBadge } from "@/components/project/StatusBadge";
-import { Button } from "@/components/ui/button";
-import { overviewDemo } from "@/lib/overview-demo";
+import type { PageAiResult } from "@/lib/ai-results";
 import {
   isCrawled,
   onPageCheckIds,
@@ -43,6 +39,8 @@ import type { PlanId } from "@/lib/plan";
 import { findHomepage, normalizeSiteUrl } from "@/lib/site-url";
 import { cn } from "@/lib/utils";
 
+const shortDate = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
+
 export function SiteOverview({
   project,
   plan,
@@ -50,6 +48,11 @@ export function SiteOverview({
   maxPages,
   mobile,
   desktop,
+  history,
+  competitors,
+  homepageAi,
+  analysedPages,
+  aiEnabled,
 }: {
   project: Project & { pages: Page[] };
   plan: PlanId;
@@ -57,13 +60,16 @@ export function SiteOverview({
   maxPages: number;
   mobile: PerformanceAudit | null;
   desktop: PerformanceAudit | null;
+  /** Finished crawls, newest first. Scores are snapshotted on each row. */
+  history: Crawl[];
+  competitors: Competitor[];
+  homepageAi: PageAiResult | null;
+  analysedPages: number;
+  aiEnabled: boolean;
 }) {
   const homepage = findHomepage(project.pages, project.rootUrl);
   const parsed = normalizeSiteUrl(project.rootUrl);
   const hostname = "hostname" in parsed ? parsed.hostname : project.name;
-  // AI, competitors, insights and the trend are still sample data while they
-  // are built. Premium sees them as work in progress; Free sees them locked.
-  const demo = overviewDemo;
   const premium = plan !== "free";
 
   // Free audits the homepage only; premium audits every crawled page.
@@ -81,6 +87,11 @@ export function SiteOverview({
       !latest || page.createdAt > latest ? page.createdAt : latest,
     null,
   );
+  // Oldest first for charts. Every point is a stored crawl snapshot, not sample data.
+  const timeline = [...history].reverse().filter((crawl) => crawl.seoScore != null);
+  const series = (key: "seoScore" | "technicalScore" | "onPageScore") =>
+    timeline.map((crawl) => (crawl[key] == null ? null : Math.round(crawl[key] as number)));
+  const groups = premium ? groupFindings(scopePages) : [];
   const health = { optimized: 0, issues: 0, warnings: 0, critical: 0 };
   for (const page of crawledPages) {
     const verdict = pageHealth(page);
@@ -121,12 +132,6 @@ export function SiteOverview({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {premium ? (
-            <span className="inline-flex h-11 items-center gap-2 rounded-full bg-surface-soft px-4 font-mono text-[12px] text-body ring-1 ring-hairline">
-              <Calendar className="size-3.5" aria-hidden />
-              {demo.dateRange}
-            </span>
-          ) : null}
           <RecrawlButton
             projectId={project.id}
             maxPages={maxPages}
@@ -155,7 +160,7 @@ export function SiteOverview({
               label="Overall SEO score"
               icon={Crosshair}
               score={scores.overall}
-              spark={[]}
+              spark={premium ? series("seoScore") : []}
               sparkLabel="Overall SEO trend"
               ring
             />
@@ -163,7 +168,7 @@ export function SiteOverview({
               label="Technical SEO"
               icon={CircleDot}
               score={scores.technical}
-              spark={[]}
+              spark={premium ? series("technicalScore") : []}
               sparkLabel="Technical SEO trend"
               sparkClass="text-primary"
             />
@@ -171,7 +176,7 @@ export function SiteOverview({
               label="On-page SEO"
               icon={Workflow}
               score={scores.onPage}
-              spark={[]}
+              spark={premium ? series("onPageScore") : []}
               sparkLabel="On-page SEO trend"
               sparkClass="text-ink"
             />
@@ -192,42 +197,39 @@ export function SiteOverview({
               className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
             >
               <Card>
-                <div className="flex flex items-center justify-between gap-2 -mb-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-col gap-0.5">
                     <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
-                      Performance overview
+                      Score history
                     </h2>
+                    <p className="font-mono text-[12px] text-muted-foreground">
+                      {timeline.length === 0
+                        ? "No finished crawl yet"
+                        : `${timeline.length} ${timeline.length === 1 ? "crawl" : "crawls"} since ${shortDate.format(timeline[0].startedAt)}`}
+                    </p>
                   </div>
-                  <ul className="flex flex-wrap gap-4 font-mono text-[12px] text-body h-full items-center">
+                  <ul className="flex flex-wrap items-center gap-4 font-mono text-[12px] text-body">
                     <LegendDot className="bg-[#8b7cf6]" label="SEO score" />
-                    <LegendDot className="bg-[#2dd4bf]" label="Performance" />
-                    <LegendDot className="bg-good" label="Technical" />
+                    <LegendDot className="bg-[#2dd4bf]" label="Technical" />
+                    <LegendDot className="bg-good" label="On-page" />
                   </ul>
                 </div>
-                <TrendLines
-                  label="SEO, performance, and technical scores from Nov 11 to Nov 18"
-                  ticks={[...demo.trend.labels]}
-                  series={[
-                    {
-                      key: "seo",
-                      label: "SEO score",
-                      values: [...demo.trend.seo],
-                      color: "#8b7cf6",
-                    },
-                    {
-                      key: "perf",
-                      label: "Performance",
-                      values: [...demo.trend.performance],
-                      color: "#2dd4bf",
-                    },
-                    {
-                      key: "tech",
-                      label: "Technical",
-                      values: [...demo.trend.technical],
-                      color: "#3ecf8e",
-                    },
-                  ]}
-                />
+                {timeline.length >= 2 ? (
+                  <TrendLines
+                    label={`SEO, technical and on-page scores across ${timeline.length} crawls`}
+                    ticks={timeline.map((crawl) => shortDate.format(crawl.startedAt))}
+                    series={[
+                      { key: "seo", label: "SEO score", values: series("seoScore"), color: "#8b7cf6" },
+                      { key: "tech", label: "Technical", values: series("technicalScore"), color: "#2dd4bf" },
+                      { key: "onpage", label: "On-page", values: series("onPageScore"), color: "#3ecf8e" },
+                    ]}
+                  />
+                ) : (
+                  <p className="flex min-h-40 items-center text-sm leading-6 text-body">
+                    The trend appears after your next crawl, so you can see whether your fixes moved
+                    the score. Re-crawl once you have made changes.
+                  </p>
+                )}
               </Card>
 
               <Card>
@@ -286,194 +288,27 @@ export function SiteOverview({
             />
           </section>
 
-          {premium ? (
-            <section aria-labelledby="next-actions">
-              <h2
-                id="next-actions"
-                className="mb-3 font-display text-[18px] leading-6 tracking-[-0.3px] text-ink"
-              >
-                Next best actions
-              </h2>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                {demo.actions.map((row) => (
-                  <Link
-                    key={row.title}
-                    href={`/projects/${project.id}/${row.href}`}
-                    className="flex min-h-11 items-center justify-between gap-3 rounded-xl bg-surface-soft px-4 py-3 ring-1 ring-hairline hover:bg-surface-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <p className="truncate text-sm text-ink">{row.title}</p>
-                      <p className="truncate font-mono text-[12px] text-muted-foreground">
-                        {row.hint}
-                      </p>
-                    </div>
-                    <span className="font-mono text-[12px] text-body">
-                      View
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          ) : null}
+          {premium ? <NextActions projectId={project.id} groups={groups} /> : null}
         </div>
 
         {premium ? (
           <aside className="flex flex-col gap-4">
-            <Card>
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="flex items-center gap-2 font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
-                  <Sparkles className="size-4 text-primary" aria-hidden />
-                  AI Assistant
-                </h2>
-                <p className="font-mono text-[12px] text-muted-foreground">
-                  Powered by Claude
-                </p>
-              </div>
-              <div className="flex flex-col gap-2">
-                <p className="font-mono text-[12px] text-muted-foreground">
-                  Top recommendation
-                </p>
-                <p className="text-sm leading-6 text-body">
-                  {demo.recommendation}
-                </p>
-              </div>
-              <Button asChild className="h-11 w-full">
-                <Link
-                  href={
-                    homepage
-                      ? `/projects/${project.id}/pages/${homepage.id}`
-                      : `/projects/${project.id}/pages`
-                  }
-                >
-                  Generate fix
-                </Link>
-              </Button>
-              <div className="flex flex-col gap-2">
-                <p className="font-mono text-[12px] text-muted-foreground">
-                  Quick AI actions
-                </p>
-                <ul className="flex flex-col">
-                  {demo.quickActions.map((label) => (
-                    <li key={label}>
-                      <Link
-                        href={`/projects/${project.id}/pages`}
-                        className="flex min-h-11 items-center justify-between gap-2 border-t border-hairline text-sm text-ink first:border-t-0 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <span className="truncate">{label}</span>
-                        <ArrowUpRight
-                          className="size-3.5 shrink-0 text-muted-foreground"
-                          aria-hidden
-                        />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </Card>
-
-            <Card>
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex min-w-0 flex-col gap-1">
-                  <h2 className="flex items-center gap-2 font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
-                    <span className="flex size-6 items-center justify-center rounded-full bg-surface-card text-body">
-                      <Swords className="size-3.5" aria-hidden />
-                    </span>
-                    Competitor analysis
-                  </h2>
-                  <p className="font-mono text-[12px] text-muted-foreground">
-                    {demo.competitors.length} competitors found
-                  </p>
-                </div>
-                <Link
-                  href={`/projects/${project.id}/competitors`}
-                  className="inline-flex h-11 items-center font-mono text-[12px] text-body hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  View all
-                </Link>
-              </div>
-              <ul className="flex flex-col gap-1">
-                {demo.competitors.map((row) => (
-                  <li key={row.domain} className="flex items-center gap-3 py-2">
-                    <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-card ring-1 ring-hairline">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(row.domain)}&sz=64`}
-                        alt=""
-                        width={20}
-                        height={20}
-                        className="size-5"
-                      />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-mono text-sm text-ink">
-                        {row.domain}
-                      </p>
-                      <p className="font-mono text-[12px] text-muted-foreground">
-                        +{row.extraPages} more pages
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="font-mono text-[12px] tabular-nums text-good">
-                        +{row.delta}%
-                      </p>
-                      <p className="font-mono text-[11px] text-muted-foreground">
-                        vs. you
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-
-            <Card>
-              <h2 className="flex items-center gap-2 font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
-                <span className="flex size-6 items-center justify-center rounded-full bg-surface-card text-body">
-                  <Lightbulb className="size-3.5" aria-hidden />
-                </span>
-                Key insights
-              </h2>
-              <ul className="flex flex-col">
-                {demo.insights.map((item) => {
-                  const Icon =
-                    item.tone === "bad"
-                      ? UserRound
-                      : item.tone === "warn"
-                        ? Gauge
-                        : CirclePlus;
-                  return (
-                    <li key={item.title}>
-                      <Link
-                        href={`/projects/${project.id}/${item.href}`}
-                        className="flex min-h-11 items-center gap-3 py-2.5 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <span
-                          className={cn(
-                            "flex size-8 shrink-0 items-center justify-center rounded-full",
-                            item.tone === "bad" && "bg-bad/15 text-bad",
-                            item.tone === "warn" && "bg-warn/15 text-warn",
-                            item.tone === "good" && "bg-good/15 text-good",
-                          )}
-                        >
-                          <Icon className="size-3.5" aria-hidden />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm leading-5 text-ink">
-                            {item.title}
-                          </p>
-                          <p className="text-xs leading-5 text-body">
-                            {item.detail}
-                          </p>
-                        </div>
-                        <ChevronRight
-                          className="size-4 shrink-0 text-muted-foreground"
-                          aria-hidden
-                        />
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Card>
+            <AiAssistantCard
+              projectId={project.id}
+              homepageId={homepage?.id ?? null}
+              result={homepageAi}
+              analysedPages={analysedPages}
+              totalPages={crawledPages.length}
+              aiEnabled={aiEnabled}
+            />
+            <CompetitorCard projectId={project.id} competitors={competitors} />
+            <KeyInsightsCard
+              projectId={project.id}
+              groups={groups}
+              crawledCount={crawledPages.length}
+              crawl={history[0] ?? null}
+              performance={homepagePerf}
+            />
           </aside>
         ) : (
           <aside className="flex flex-col gap-4">

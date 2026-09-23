@@ -1,6 +1,7 @@
 import type { Page } from "@seo-maker/db";
 import Link from "next/link";
 import { ArrowUpRight, Check, CircleAlert, Lock, TriangleAlert } from "lucide-react";
+import { groupFindings } from "@/components/project/OverviewInsights";
 import { GoPremiumButton } from "@/components/project/PremiumGate";
 import { checks, isCrawled, toPageIssues, type PageIssueRecord } from "@/lib/page-audit";
 import { pagePath } from "@/lib/site-url";
@@ -50,7 +51,8 @@ export function OverviewProblems({
   const findings = findingsFor(pages);
   const failing = findings.filter((row) => row.status === "fail").length;
   const warnings = findings.length - failing;
-  const visible = detailed ? findings.slice(0, 8) : findings;
+  const groups = detailed ? groupFindings(pages) : [];
+  const visibleGroups = groups.slice(0, 6);
 
   return (
     <section
@@ -87,9 +89,66 @@ export function OverviewProblems({
           <Check className="size-4 text-good" aria-hidden />
           {detailed ? "Every crawled page passes every check." : "Your homepage passes every check."}
         </p>
+      ) : detailed ? (
+        <ul className="divide-y divide-hairline">
+          {visibleGroups.map((group) => {
+            const example = group.pages.find((row) => row.evidence) ?? group.pages[0];
+            return (
+              <li key={group.checkId} className="flex gap-3 px-5 py-4">
+                <StatusIcon status={group.status} />
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <p className="text-sm font-medium text-ink">{group.label}</p>
+                    <SeverityPill severity={group.severity} />
+                    <span className="font-mono text-[12px] tabular-nums text-body">
+                      {group.pages.length} {group.pages.length === 1 ? "page" : "pages"}
+                    </span>
+                  </div>
+                  {example?.evidence ? (
+                    <p
+                      className={cn(
+                        "break-words text-sm leading-6",
+                        group.status === "fail" ? "text-bad" : "text-warn",
+                      )}
+                    >
+                      {group.pages.length > 1 ? (
+                        <span className="font-mono text-[12px] text-muted-foreground">
+                          e.g. {example.path}:{" "}
+                        </span>
+                      ) : null}
+                      {example.evidence}
+                    </p>
+                  ) : null}
+                  {group.recommendation ? (
+                    <p className="break-words border-l-2 border-hairline pl-3 text-xs leading-5 text-muted-foreground">
+                      {group.recommendation}
+                    </p>
+                  ) : null}
+                  <ul className="flex flex-wrap gap-1.5 pt-0.5">
+                    {group.pages.slice(0, 4).map((row) => (
+                      <li key={row.id}>
+                        <Link
+                          href={`/projects/${projectId}/pages/${row.id}`}
+                          className="inline-flex min-h-7 max-w-[240px] items-center truncate rounded-full bg-canvas/70 px-2.5 font-mono text-[11px] text-body ring-1 ring-hairline hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {row.path}
+                        </Link>
+                      </li>
+                    ))}
+                    {group.pages.length > 4 ? (
+                      <li className="inline-flex min-h-7 items-center px-1 font-mono text-[11px] text-muted-foreground">
+                        +{group.pages.length - 4} more
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       ) : (
         <ul className="divide-y divide-hairline">
-          {visible.map((row) => (
+          {findings.map((row) => (
             <li key={`${row.page.id}-${row.checkId}`} className="flex gap-3 px-5 py-4">
               <StatusIcon status={row.status} />
               <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -130,9 +189,9 @@ export function OverviewProblems({
         </ul>
       )}
 
-      {detailed && findings.length > visible.length ? (
+      {detailed && groups.length > visibleGroups.length ? (
         <p className="border-t border-hairline px-5 py-3 font-mono text-[12px] text-muted-foreground">
-          {findings.length - visible.length} more on the Pages screen
+          {groups.length - visibleGroups.length} more {groups.length - visibleGroups.length === 1 ? "check" : "checks"} on the Pages screen
         </p>
       ) : null}
 
