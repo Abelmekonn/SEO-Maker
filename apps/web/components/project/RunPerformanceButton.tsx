@@ -38,6 +38,8 @@ export function RunPerformanceButton({
       setError(data?.error ?? "Could not start PageSpeed.");
       return;
     }
+    // Lights up the sidebar's PageSpeed indicator straight away.
+    window.dispatchEvent(new Event("seo-maker:perf-queued"));
     router.refresh();
   }
 

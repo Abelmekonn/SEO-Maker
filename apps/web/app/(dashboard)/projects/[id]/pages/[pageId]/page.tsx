@@ -3,7 +3,6 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/dashboard/shell";
-import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { fixPlanInputFromPage, planFixes } from "@seo-maker/core/page";
 import { prisma } from "@seo-maker/db";
 import { AiQueueStatus } from "@/components/project/AiQueueStatus";
@@ -71,7 +70,6 @@ export default async function ProjectPageDetailPage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-8">
-      <CrawlRefresh status={page.status} />
       <Link
         href={`/projects/${id}/pages`}
         className="inline-flex min-h-10 w-fit items-center gap-1.5 rounded-md font-mono text-sm text-body hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

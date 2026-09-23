@@ -37,12 +37,17 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
   const maxPages = Math.max(1, project.maxPages ?? 1);
 
   const crawl = await prisma.crawl.create({
-    data: { projectId, status: "crawling", maxPages },
+    data: { projectId, status: "crawling", phase: "starting", maxPages },
   });
 
+  // The project keeps pointing at its last finished crawl until this one
+  // completes. Switching at the start made every screen read a half-finished
+  // crawl: the overview showed a few pages and scores that moved while you
+  // looked. The live view reads the running crawl directly instead.
+  const previousCrawlId = project.latestCrawlId;
   await prisma.project.update({
     where: { id: projectId },
-    data: { status: "crawling", latestCrawlId: crawl.id },
+    data: { status: "crawling" },
   });
 
   let saved = 0;
@@ -51,6 +56,19 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
   try {
     const result = await crawlSite(url, maxPages, {
       classify: classifyContext(project),
+      onPhase: async (phase) => {
+        await prisma.crawl.update({ where: { id: crawl.id }, data: { phase } });
+      },
+      onPlan: async (plan) => {
+        await prisma.crawl.update({
+          where: { id: crawl.id },
+          data: {
+            discovered: plan.seeds + plan.deferred,
+            queued: plan.seeds,
+            seedPlan: { ...plan, live: true } satisfies Prisma.InputJsonValue,
+          },
+        });
+      },
       onPage: async (audit) => {
         await savePage(projectId, crawl.id, audit);
         saved += 1;
@@ -67,6 +85,7 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
       where: { id: crawl.id },
       data: {
         status: "analyzing",
+        phase: "scoring",
         discovered: result.seedPlan.seeds.length + result.seedPlan.deferred,
         queued: result.seedPlan.seeds.length,
         crawled: result.pages.length,
@@ -97,15 +116,20 @@ export async function crawlHomepageJob(data: CrawlHomepageJob) {
       where: { id: crawl.id },
       data: {
         status: "failed",
+        phase: "failed",
         finishedAt: new Date(),
         error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
         crawled: saved,
         failed,
       },
     });
+    // A failed re-crawl leaves the last good results in place. A failed first
+    // crawl has nothing to fall back to, so its partial pages are shown.
     await prisma.project.update({
       where: { id: projectId },
-      data: { status: saved > 0 ? "analyzed" : "failed" },
+      data: previousCrawlId
+        ? { status: "analyzed" }
+        : { status: saved > 0 ? "analyzed" : "failed", latestCrawlId: crawl.id },
     });
     throw error;
   }
@@ -141,6 +165,7 @@ async function finishCrawl(projectId: string, crawlId: string) {
     where: { id: crawlId },
     data: {
       status: analyzed === 0 && failed > 0 ? "failed" : "completed",
+      phase: "done",
       finishedAt: new Date(),
       analyzed,
       failed,
@@ -151,9 +176,11 @@ async function finishCrawl(projectId: string, crawlId: string) {
     },
   });
 
+  // Only now does the project switch to this crawl, so every screen moves
+  // from the previous complete results to the new complete results at once.
   await prisma.project.update({
     where: { id: projectId },
-    data: { status: analyzed === 0 && failed > 0 ? "failed" : "analyzed" },
+    data: { status: analyzed === 0 && failed > 0 ? "failed" : "analyzed", latestCrawlId: crawlId },
   });
 }
 
@@ -289,4 +316,43 @@ function classifyContext(project: {
     ? "service"
     : "product";
   return { offerings, offeringKind, overrides };
+}
+
+/**
+ * Closes out crawls a previous worker process left mid-flight.
+ *
+ * A worker stopped during a crawl (a restart, a closed terminal) leaves its
+ * Crawl row at "crawling" forever, and the progress view would wait on it for
+ * ever. There is one crawl worker at crawl concurrency 1, so at startup
+ * nothing is legitimately running yet: anything still marked running was
+ * interrupted. BullMQ re-queues the stalled job itself, which starts a fresh
+ * crawl; this only records what happened to the old one.
+ */
+export async function recoverInterruptedCrawls(): Promise<number> {
+  const stuck = await prisma.crawl.findMany({
+    where: { status: { in: ["crawling", "analyzing", "pending"] } },
+    select: { id: true, projectId: true },
+  });
+  if (stuck.length === 0) return 0;
+
+  await prisma.crawl.updateMany({
+    where: { id: { in: stuck.map((row) => row.id) } },
+    data: {
+      status: "failed",
+      phase: "failed",
+      finishedAt: new Date(),
+      error: "Interrupted: the worker stopped while this crawl was running.",
+    },
+  });
+
+  for (const projectId of new Set(stuck.map((row) => row.projectId))) {
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { latestCrawlId: true, status: true } });
+    if (project && project.status === "crawling") {
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { status: project.latestCrawlId ? "analyzed" : "failed" },
+      });
+    }
+  }
+  return stuck.length;
 }

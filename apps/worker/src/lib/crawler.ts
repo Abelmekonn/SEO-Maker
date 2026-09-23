@@ -146,7 +146,26 @@ function crawlConcurrency(): number {
  */
 const MAX_CRAWL_DELAY_SECS = 5;
 
+/** Where a crawl is, for the live progress view. */
+export type CrawlPhase = "discovering" | "crawling";
+
+/** What the crawl will do, known before the first page is fetched. */
+export type CrawlPlanInfo = {
+  /** URLs the crawl will fetch. The progress bar's denominator. */
+  seeds: number;
+  /** Candidate URLs left out because they exceed the page budget. */
+  deferred: number;
+  sections: number;
+  sitemapUrls: number;
+  robotsFound: boolean;
+  /** Seconds between requests when robots.txt asks for it, else 0. */
+  crawlDelay: number;
+  concurrency: number;
+};
+
 export type CrawlHooks = {
+  onPhase?: (phase: CrawlPhase) => Promise<void>;
+  onPlan?: (plan: CrawlPlanInfo) => Promise<void>;
   onPage?: (audit: PageAudit) => Promise<void>;
   onFailure?: (failure: PageFailure) => Promise<void>;
   /** Business context that sharpens page classification (Deep mode). */
@@ -176,6 +195,7 @@ export async function crawlSite(
   const origin = entry.url.origin;
   const siteHost = hostKey(entry.url.hostname);
 
+  await hooks?.onPhase?.("discovering");
   const robots = await readRobots(origin);
   const group = robots.parsed ? groupFor(robots.parsed) : null;
   const sitemap = await readSitemaps(robots.parsed?.sitemaps ?? [], origin, siteHost);
@@ -503,6 +523,16 @@ export async function crawlSite(
     new Configuration({ persistStorage: false, systemInfoV2: false }),
   );
 
+  await hooks?.onPlan?.({
+    seeds: plan.seeds.length,
+    deferred: plan.deferred,
+    sections: plan.sections.length,
+    sitemapUrls: sitemap.urls.length,
+    robotsFound: robotsAudit.found,
+    crawlDelay,
+    concurrency: crawlDelay ? 1 : crawlConcurrency(),
+  });
+  await hooks?.onPhase?.("crawling");
   await crawler.run(plan.seeds.map((url) => ({ url, uniqueKey: url })));
 
   if (pages.length === 0 && failures.length === 0) {

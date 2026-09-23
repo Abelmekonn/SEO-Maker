@@ -183,3 +183,22 @@ export async function getAiQueueJobs(projectId: string): Promise<AiQueueJob[]> {
   });
   return jobs;
 }
+
+/**
+ * Whether a crawler worker is connected, and where this project's crawl job
+ * waits. The Crawl button only queues a job; this is how the UI proves a worker
+ * will actually pick it up instead of leaving it waiting forever.
+ */
+export async function getCrawlQueueState(projectId: string): Promise<{
+  workerOnline: boolean;
+  waitingPosition: number | null;
+}> {
+  const queue = getCrawlQueue();
+  const [workers, waiting] = await Promise.all([
+    queue.getWorkersCount(),
+    queue.getJobs(["waiting", "prioritized", "delayed"], 0, 200, true),
+  ]);
+  const index = waiting.findIndex((job) => job?.data && "projectId" in job.data && job.data.projectId === projectId);
+  return { workerOnline: workers > 0, waitingPosition: index === -1 ? null : index + 1 };
+}
+

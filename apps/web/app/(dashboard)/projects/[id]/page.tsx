@@ -1,11 +1,13 @@
 import { compareCrawls } from "@seo-maker/core/crawl";
 import { prisma } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
+import { CrawlProgressView } from "@/components/project/CrawlProgressView";
 import { ProjectOverview } from "@/components/project/ProjectOverview";
+import { getCrawlProgress } from "@/lib/crawl-progress";
 import { aiConfigured, getPageRecommendation } from "@/lib/ai-results";
 import { getAccountForUser } from "@/lib/plan";
 import { getCrawlHistory, getProjectForUser, requireUserId } from "@/lib/projects";
-import { findHomepage } from "@/lib/site-url";
+import { findHomepage, normalizeSiteUrl } from "@/lib/site-url";
 
 export default async function ProjectOverviewPage({
   params,
@@ -22,6 +24,21 @@ export default async function ProjectOverviewPage({
 
   if (!project) {
     notFound();
+  }
+
+  // While a crawl is queued or running, the overview is its progress view.
+  // It switches to the real overview once the crawl's results are complete,
+  // instead of opening on an empty site that fills in while you watch.
+  const progress = await getCrawlProgress(project);
+  if (progress.state === "queued" || progress.state === "running") {
+    const parsed = normalizeSiteUrl(project.rootUrl);
+    return (
+      <CrawlProgressView
+        projectId={project.id}
+        hostname={"hostname" in parsed ? parsed.hostname : project.name}
+        initial={progress}
+      />
+    );
   }
 
   const account = await getAccountForUser(userId);
@@ -68,7 +85,17 @@ export default async function ProjectOverviewPage({
   const mobile = audits.find((audit) => audit.strategy === "mobile") ?? null;
   const desktop = audits.find((audit) => audit.strategy === "desktop") ?? null;
 
+  const failedRecrawl = progress.state === "failed" && progress.hasPrevious ? progress : null;
+
   return (
+    <>
+    {failedRecrawl ? (
+      <p role="alert" className="mb-4 rounded-xl bg-surface-soft px-4 py-3 text-sm leading-6 text-body ring-1 ring-bad/30">
+        <span className="text-ink">The latest crawl stopped before it finished</span>
+        {failedRecrawl.error ? ` (${failedRecrawl.error.slice(0, 160)})` : ""}. These are your previous results,
+        unchanged.
+      </p>
+    ) : null}
     <ProjectOverview
       project={project}
       plan={account.plan}
@@ -84,5 +111,6 @@ export default async function ProjectOverviewPage({
       analysedPages={analysed.length}
       aiEnabled={aiConfigured()}
     />
+    </>
   );
 }

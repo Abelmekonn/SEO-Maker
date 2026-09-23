@@ -35,6 +35,16 @@
       transform: translateX(-50%);
     }
   }
+  /* A light sweep across an active progress bar: motion that says "working". */
+  --animate-progress-sheen: progress-sheen 1.8s ease-in-out infinite;
+  @keyframes progress-sheen {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(250%);
+    }
+  }
   --color-canvas: var(--canvas);
   --color-ink: var(--ink);
   --color-body: var(--body);

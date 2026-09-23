@@ -13,10 +13,19 @@ import { Worker } from "bullmq";
 import IORedis from "ioredis";
 import { aiAnalyzePageJob } from "./jobs/ai/analyze-page.js";
 import { competitorAnalyzeOneJob } from "./jobs/competitors/analyze-one.js";
-import { crawlHomepageJob, type CrawlHomepageJob } from "./jobs/crawl-site";
+import { crawlHomepageJob, recoverInterruptedCrawls, type CrawlHomepageJob } from "./jobs/crawl-site";
 import { runPerformanceJob, type RunPerformanceJob } from "./jobs/run-performance";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6380";
+
+// Before taking new work, close out crawls a previous process left running.
+const recovered = await recoverInterruptedCrawls().catch((error) => {
+  console.error("Could not recover interrupted crawls:", error);
+  return 0;
+});
+if (recovered > 0) {
+  console.log(`Marked ${recovered} interrupted crawl(s) as failed.`);
+}
 const connection = new IORedis(redisUrl, { maxRetriesPerRequest: null });
 
 const crawlWorker = new Worker<CrawlHomepageJob | RunPerformanceJob>(

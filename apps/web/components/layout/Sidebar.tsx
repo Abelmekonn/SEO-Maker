@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -14,6 +14,7 @@ import {
   Hexagon,
   LayoutDashboard,
   Lightbulb,
+  Loader2,
   Lock,
   Menu,
   Plus,
@@ -24,11 +25,66 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { AI_QUEUED_EVENT } from "@/components/project/AiQueueStatus";
+import { CRAWL_QUEUED_EVENT } from "@/components/project/CrawlMiniStatus";
 import { clerkDarkAppearance } from "@/lib/clerk-appearance";
 import type { PlanId } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 
 type ProjectSummary = { id: string; name: string; status: string };
+
+type Activity = {
+  crawl: { running: boolean; done: number; total: number };
+  performance: { running: boolean; done: number; total: number };
+  competitors: { running: boolean };
+  ai: { running: boolean; jobs: number };
+};
+
+/**
+ * What is running for the open project, for the sidebar's mini progress.
+ *
+ * Polls quickly while something is in flight and slowly otherwise, and at
+ * once when this tab starts a crawl or an AI run, so the indicator appears
+ * the moment the work is queued.
+ */
+function useProjectActivity(projectId: string | null): Activity | null {
+  const [activity, setActivity] = useState<Activity | null>(null);
+  const [tick, setTick] = useState(0);
+
+  const load = useCallback(async () => {
+    if (!projectId) return;
+    const response = await fetch(`/api/projects/${projectId}/activity`, { cache: "no-store" }).catch(() => null);
+    if (response?.ok) setActivity((await response.json()) as Activity);
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load, tick]);
+
+  useEffect(() => {
+    const bump = () => setTick((value) => value + 1);
+    window.addEventListener(CRAWL_QUEUED_EVENT, bump);
+    window.addEventListener(AI_QUEUED_EVENT, bump);
+    window.addEventListener("seo-maker:perf-queued", bump);
+    return () => {
+      window.removeEventListener(CRAWL_QUEUED_EVENT, bump);
+      window.removeEventListener(AI_QUEUED_EVENT, bump);
+      window.removeEventListener("seo-maker:perf-queued", bump);
+    };
+  }, []);
+
+  const busy = Boolean(
+    activity &&
+      (activity.crawl.running || activity.performance.running || activity.competitors.running || activity.ai.running),
+  );
+  useEffect(() => {
+    if (!projectId) return;
+    const timer = window.setInterval(() => void load(), busy ? 4000 : 20000);
+    return () => window.clearInterval(timer);
+  }, [busy, load, projectId]);
+
+  return projectId ? activity : null;
+}
 
 function projectIdFromPath(pathname: string) {
   const parts = pathname.split("/");
@@ -66,6 +122,22 @@ export function Sidebar({ plan }: { plan: PlanId }) {
         { href: `${projectBase}/settings`, label: "Settings", icon: Settings, exact: false },
       ]
     : [];
+
+  const activity = useProjectActivity(projectId);
+  const running: Record<string, string | true | undefined> = {
+    [`${projectBase}`]: activity?.crawl.running
+      ? activity.crawl.total
+        ? `${activity.crawl.done}/${activity.crawl.total}`
+        : true
+      : undefined,
+    [`${projectBase}/performance`]: activity?.performance.running
+      ? activity.performance.total
+        ? `${activity.performance.done}/${activity.performance.total}`
+        : true
+      : undefined,
+    [`${projectBase}/competitors`]: activity?.competitors.running ? true : undefined,
+    [`${projectBase}/suggestions`]: activity?.ai.running ? `${activity.ai.jobs}` : undefined,
+  };
 
   function isActive(href: string, exact: boolean) {
     return exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
@@ -185,6 +257,7 @@ export function Sidebar({ plan }: { plan: PlanId }) {
                 href={item.href}
                 active={isActive(item.href, item.exact)}
                 locked={plan === "free" && "premium" in item}
+                activity={running[item.href]}
               >
                 <item.icon className="size-3.5 shrink-0" aria-hidden />
                 {item.label}
@@ -197,6 +270,7 @@ export function Sidebar({ plan }: { plan: PlanId }) {
                   href={item.href}
                   active={isActive(item.href, item.exact)}
                   locked={plan === "free" && "premium" in item}
+                  activity={running[item.href]}
                 >
                   <item.icon className="size-3.5 shrink-0" aria-hidden />
                   {item.label}
@@ -392,12 +466,15 @@ function NavLink({
   href,
   active,
   locked = false,
+  activity,
   children,
 }: {
   href: string;
   active: boolean;
   /** Premium screen on a Free plan: still navigable, lands on the upgrade screen. */
   locked?: boolean;
+  /** Work running for this screen: true for a spinner, or a short count. */
+  activity?: string | true;
   children: ReactNode;
 }) {
   return (
@@ -413,7 +490,14 @@ function NavLink({
       )}
     >
       {children}
-      {locked ? (
+      {activity ? (
+        <span className="ml-auto inline-flex items-center gap-1 font-mono text-[10px] tabular-nums opacity-90">
+          {typeof activity === "string" ? activity : null}
+          <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />
+          <span className="sr-only">(in progress)</span>
+        </span>
+      ) : null}
+      {!activity && locked ? (
         <>
           <Lock className="ml-auto size-3 shrink-0 opacity-70" aria-hidden />
           <span className="sr-only">(premium)</span>

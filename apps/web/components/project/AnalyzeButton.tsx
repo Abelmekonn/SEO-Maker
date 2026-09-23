@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AI_QUEUED_EVENT } from "@/components/project/AiQueueStatus";
 import { cn } from "@/lib/utils";
@@ -94,7 +94,11 @@ export function AnalyzeButton({
         onClick={onClick}
         title={disabledReason}
       >
-        <Sparkles className="size-3.5" aria-hidden />
+        {pending ? (
+          <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+        ) : (
+          <Sparkles className="size-3.5" aria-hidden />
+        )}
         {pending ? "Queuing" : text}
       </Button>
       {disabledReason ? (

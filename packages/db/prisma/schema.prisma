@@ -93,6 +93,9 @@ model Crawl {
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   status   String  @default("pending")
+  /// Live progress: starting | discovering | crawling | scoring | done | failed.
+  /// Written as the worker moves through a crawl, for the progress view.
+  phase    String?
   maxPages Int     @default(1)
   error    String?
 

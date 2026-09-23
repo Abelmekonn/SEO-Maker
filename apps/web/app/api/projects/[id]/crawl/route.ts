@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
+import { getCrawlProgress } from "@/lib/crawl-progress";
 import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { enqueueHomepageCrawl } from "@/lib/queue";
@@ -12,9 +13,24 @@ import { findHomepage } from "@/lib/site-url";
  * pending, so the moment a user pressed "Crawl again" the previous results
  * were gone — and if the new crawl failed there was nothing to fall back to.
  * The worker now writes into a fresh `Crawl`, and the project only points at
- * it once that run has pages, so the last good crawl stays readable
+ * it once that run completes, so the last good crawl stays readable
  * throughout.
  */
+
+/** Live progress of the running (or last) crawl, polled by the progress view. */
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Sign in to view crawl progress." }, { status: 401 });
+  }
+  const { id } = await params;
+  const project = await prisma.project.findFirst({ where: { id, userId } });
+  if (!project) {
+    return NextResponse.json({ error: "Project not found." }, { status: 404 });
+  }
+  return NextResponse.json(await getCrawlProgress(project));
+}
+
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await requireUserId();
   if (!userId) {

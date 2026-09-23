@@ -1,6 +1,5 @@
 import { notFound, redirect } from "next/navigation";
 import { Globe } from "lucide-react";
-import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { PagesBoard } from "@/components/project/PagesBoard";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { StatusBadge } from "@/components/project/StatusBadge";
@@ -35,7 +34,6 @@ export default async function ProjectPagesPage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-5">
-      <CrawlRefresh status={project.status} />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
           <span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-soft text-body ring-1 ring-hairline">

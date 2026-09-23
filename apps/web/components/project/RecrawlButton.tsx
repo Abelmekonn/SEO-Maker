@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Play } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
+import { CRAWL_QUEUED_EVENT } from "@/components/project/CrawlMiniStatus";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,9 @@ export function RecrawlButton({
       setError(data?.error ?? "Could not start the crawl.");
       return;
     }
+    // The overview re-renders as the progress view; every other screen's
+    // mini status starts tracking the crawl straight away.
+    window.dispatchEvent(new Event(CRAWL_QUEUED_EVENT));
     router.refresh();
   }
 
@@ -45,7 +49,11 @@ export function RecrawlButton({
         disabled={pending}
         onClick={onClick}
       >
-        <Play className="size-3.5 fill-current" aria-hidden />
+        {pending ? (
+          <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+        ) : (
+          <Play className="size-3.5 fill-current" aria-hidden />
+        )}
         {label}
       </Button>
       {error ? (
