@@ -1,7 +1,7 @@
 /**
- * Page-level AI job (Phase 1.9, Phase 2.1).
+ * Page-level AI job .
  *
- * The Phase 2 pipeline for one page:
+ * pipeline for one page:
  *
  *   crawl evidence -> failing checks -> fix plan (deterministic / generate / blocked)
  *     -> page-recommendation: explain every failing check

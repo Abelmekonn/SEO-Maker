@@ -1,5 +1,5 @@
 /**
- * Context builders (Phase 1.8).
+ * Context builders .
  *
  * Prompts receive context objects; prompts never query Prisma. Everything a
  * prompt is allowed to state about a page or a site is assembled here, so the
