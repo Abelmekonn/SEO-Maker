@@ -14,6 +14,7 @@ import {
   Hexagon,
   LayoutDashboard,
   Lightbulb,
+  Lock,
   Plus,
   Settings,
   Sparkles,
@@ -50,16 +51,16 @@ export function Sidebar({ plan }: { plan: PlanId }) {
         { href: projectBase, label: "Overview", icon: Hexagon, exact: true },
         { href: `${projectBase}/pages`, label: "Pages", icon: FileText, exact: false },
         { href: `${projectBase}/performance`, label: "Performance", icon: Gauge, exact: false },
-        { href: `${projectBase}/competitors`, label: "Competitors", icon: Swords, exact: false },
-        { href: `${projectBase}/opportunities`, label: "Opportunities", icon: Lightbulb, exact: false },
+        { href: `${projectBase}/competitors`, label: "Competitors", icon: Swords, exact: false, premium: true },
+        { href: `${projectBase}/opportunities`, label: "Opportunities", icon: Lightbulb, exact: false, premium: true },
       ]
     : [];
 
   const secondaryItems = projectBase
     ? [
-        { href: `${projectBase}/tools`, label: "Tools", icon: Wrench, exact: false },
-        { href: `${projectBase}/suggestions`, label: "AI Suggestions", icon: Sparkles, exact: false },
-        { href: `${projectBase}/reports`, label: "Reports", icon: ClipboardList, exact: false },
+        { href: `${projectBase}/tools`, label: "Tools", icon: Wrench, exact: false, premium: true },
+        { href: `${projectBase}/suggestions`, label: "AI Suggestions", icon: Sparkles, exact: false, premium: true },
+        { href: `${projectBase}/reports`, label: "Reports", icon: ClipboardList, exact: false, premium: true },
         { href: `${projectBase}/settings`, label: "Settings", icon: Settings, exact: false },
       ]
     : [];
@@ -107,14 +108,24 @@ export function Sidebar({ plan }: { plan: PlanId }) {
         {projectBase ? (
           <NavSection label="Project" className="mt-5">
             {primaryItems.map((item) => (
-              <NavLink key={item.href} href={item.href} active={isActive(item.href, item.exact)}>
+              <NavLink
+                key={item.href}
+                href={item.href}
+                active={isActive(item.href, item.exact)}
+                locked={plan === "free" && "premium" in item}
+              >
                 <item.icon className="size-3.5 shrink-0" aria-hidden />
                 {item.label}
               </NavLink>
             ))}
             <div className="mt-3 flex flex-col gap-0.5">
               {secondaryItems.map((item) => (
-                <NavLink key={item.href} href={item.href} active={isActive(item.href, item.exact)}>
+                  <NavLink
+                  key={item.href}
+                  href={item.href}
+                  active={isActive(item.href, item.exact)}
+                  locked={plan === "free" && "premium" in item}
+                >
                   <item.icon className="size-3.5 shrink-0" aria-hidden />
                   {item.label}
                 </NavLink>
@@ -307,10 +318,13 @@ function NavSection({
 function NavLink({
   href,
   active,
+  locked = false,
   children,
 }: {
   href: string;
   active: boolean;
+  /** Premium screen on a Free plan: still navigable, lands on the upgrade screen. */
+  locked?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -326,6 +340,12 @@ function NavLink({
       )}
     >
       {children}
+      {locked ? (
+        <>
+          <Lock className="ml-auto size-3 shrink-0 opacity-70" aria-hidden />
+          <span className="sr-only">(premium)</span>
+        </>
+      ) : null}
     </Link>
   );
 }
@@ -338,7 +358,7 @@ function UpgradeCard() {
         <div className="min-w-0">
           <p className="text-[13px] font-semibold leading-5 text-ink">Upgrade to Pro</p>
           <p className="mt-1 text-[11px] leading-4 text-muted-soft">
-            Unlock competitor analysis, Google Search Console, and more.
+            Unlock competitors, AI suggestions, and every page on your site.
           </p>
         </div>
       </div>

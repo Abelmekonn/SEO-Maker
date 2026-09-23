@@ -6,6 +6,7 @@ import type { PlanId } from "@/lib/plan";
 
 export function ProjectOverview({
   project,
+  plan,
   planLabel,
   maxPages,
   mobile,
@@ -26,12 +27,14 @@ export function ProjectOverview({
     <div className="flex flex-col gap-6">
       <SiteOverview
         project={project}
+        plan={plan}
         planLabel={planLabel}
         maxPages={maxPages}
         mobile={mobile}
         desktop={desktop}
       />
-      <CrawlHealth crawl={crawl} comparison={comparison} />
+      {/* Site-wide crawl stats go past the homepage, so Free does not get them. */}
+      {plan !== "free" ? <CrawlHealth crawl={crawl} comparison={comparison} /> : null}
     </div>
   );
 }

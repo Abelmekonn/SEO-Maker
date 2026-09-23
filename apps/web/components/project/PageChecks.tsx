@@ -1,5 +1,6 @@
 import type { Page, PageIssue } from "@seo-maker/db";
-import { Check, CircleAlert, TriangleAlert } from "lucide-react";
+import { Check, CircleAlert, Lock, TriangleAlert } from "lucide-react";
+import { GoPremiumButton } from "@/components/project/PremiumGate";
 import { checks, checkValue, isCrawled } from "@/lib/page-audit";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +40,14 @@ type Row = {
   detail: string | null;
 };
 
-export function PageChecks({ page }: { page: Page & { issues: PageIssue[] } }) {
+export function PageChecks({
+  page,
+  detailed = true,
+}: {
+  page: Page & { issues: PageIssue[] };
+  /** Free names the problem; premium shows the evidence and the fix. */
+  detailed?: boolean;
+}) {
   const crawled = isCrawled(page);
   const byCheck = new Map(page.issues.map((issue) => [issue.checkId, issue]));
 
@@ -51,7 +59,7 @@ export function PageChecks({ page }: { page: Page & { issues: PageIssue[] } }) {
       label: check.label,
       hint: check.hint,
       issue,
-      observed: issue?.evidence ?? observed.value,
+      observed: issue ? (detailed ? issue.evidence ?? observed.value : `Expected: ${check.hint}`) : observed.value,
       detail: issue ? null : observed.detail ?? null,
     };
   });
@@ -138,7 +146,7 @@ export function PageChecks({ page }: { page: Page & { issues: PageIssue[] } }) {
                     </p>
                   ) : null}
 
-                  {row.issue?.recommendation ? (
+                  {detailed && row.issue?.recommendation ? (
                     <p className="mt-0.5 break-words border-l-2 border-hairline pl-3 text-xs leading-5 text-muted-foreground">
                       {row.issue.recommendation}
                     </p>
@@ -148,6 +156,15 @@ export function PageChecks({ page }: { page: Page & { issues: PageIssue[] } }) {
             );
           })}
         </ul>
+        {!detailed && page.issues.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-6 py-4">
+            <p className="flex min-w-0 items-start gap-2 text-sm leading-6 text-body">
+              <Lock className="mt-1 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              Premium shows the exact error the crawler found on each check and how to fix it.
+            </p>
+            <GoPremiumButton />
+          </div>
+        ) : null}
       </section>
 
       <aside className="flex flex-col gap-6">

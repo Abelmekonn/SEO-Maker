@@ -7,12 +7,13 @@ import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { AiRecommendations } from "@/components/project/AiRecommendations";
 import { PageChecks } from "@/components/project/PageChecks";
 import { PageEvidencePanel } from "@/components/project/PageEvidence";
+import { PremiumPage } from "@/components/project/PremiumGate";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { StatusBadge } from "@/components/project/StatusBadge";
 import { aiConfigured, getPageRecommendation } from "@/lib/ai-results";
 import { getAccountForUser } from "@/lib/plan";
-import { getPageForUser, requireUserId } from "@/lib/projects";
-import { pagePath } from "@/lib/site-url";
+import { getPageForUser, latestPages, requireUserId } from "@/lib/projects";
+import { findHomepage, pagePath } from "@/lib/site-url";
 
 export default async function ProjectPageDetailPage({
   params,
@@ -36,6 +37,26 @@ export default async function ProjectPageDetailPage({
     getAccountForUser(userId),
   ]);
   const liveUrl = page.finalUrl ?? page.url;
+  const premium = account.plan !== "free";
+
+  // Free covers the homepage only. Older crawls can still hold other pages.
+  if (!premium) {
+    const homepage = findHomepage(await latestPages(page.project), page.project.rootUrl);
+    if (homepage && homepage.id !== page.id) {
+      return (
+        <PremiumPage
+          projectId={id}
+          title="More than your homepage"
+          body="Free checks your homepage. Premium checks the rest of your site and shows the exact error on every page."
+          unlocks={[
+            "Every crawled page, up to your plan's page count",
+            "Exact evidence and a fix for each problem",
+            "AI explanations grounded in your pages",
+          ]}
+        />
+      );
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-8">
@@ -68,7 +89,7 @@ export default async function ProjectPageDetailPage({
           </>
         }
       />
-      <PageChecks page={page} />
+      <PageChecks page={page} detailed={premium} />
       <AiRecommendations
         result={recommendation}
         projectId={id}
@@ -77,7 +98,7 @@ export default async function ProjectPageDetailPage({
         planAllowsAi={account.limits.ai}
         planLabel={account.limits.label}
       />
-      <PageEvidencePanel page={page} />
+      {premium ? <PageEvidencePanel page={page} /> : null}
     </div>
   );
 }

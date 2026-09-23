@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/dashboard/shell";
 import { AnalyzeButton } from "@/components/project/AnalyzeButton";
 import { aiConfigured, getProjectRecommendations } from "@/lib/ai-results";
 import { UpgradePrompt } from "@/components/project/UpgradePrompt";
+import { premiumGate } from "@/components/project/PremiumRoute";
 import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { pagePath } from "@/lib/site-url";
@@ -33,6 +34,11 @@ export default async function ProjectSuggestionsPage({
   const project = await getProjectForUser(id, userId);
   if (!project) {
     notFound();
+  }
+
+  const gate = await premiumGate(project.id, "suggestions");
+  if (gate) {
+    return gate;
   }
 
   const pageIds = project.pages.map((page) => page.id);

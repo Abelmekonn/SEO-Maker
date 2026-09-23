@@ -3,6 +3,7 @@ import { prisma } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
 import { CompetitorDetail } from "@/components/project/CompetitorDetail";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
+import { premiumGate } from "@/components/project/PremiumRoute";
 import { getCompetitorForUser, serpConfigured } from "@/lib/competitors";
 import { latestPagesForProject, requireUserId } from "@/lib/projects";
 
@@ -35,6 +36,10 @@ export default async function CompetitorDetailPage({
   }
 
   const { id, competitorId } = await params;
+  const gate = await premiumGate(id, "competitors");
+  if (gate) {
+    return gate;
+  }
   const { tab } = await searchParams;
 
   const competitor = await getCompetitorForUser(id, competitorId, userId);

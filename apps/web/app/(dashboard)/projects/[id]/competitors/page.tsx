@@ -19,6 +19,7 @@ import { ContentOpportunities } from "@/components/project/ContentOpportunities"
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { getCompetitorsForProject, serpConfigured } from "@/lib/competitors";
 import { formatRelativeRun } from "@/lib/performance";
+import { premiumGate } from "@/components/project/PremiumRoute";
 import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { normalizeSiteUrl } from "@/lib/site-url";
@@ -42,6 +43,11 @@ export default async function ProjectCompetitorsPage({
   const project = await getProjectForUser(id, userId);
   if (!project) {
     notFound();
+  }
+
+  const gate = await premiumGate(project.id, "competitors");
+  if (gate) {
+    return gate;
   }
 
   const [account, competitors, progress, totalQueries, allDomains, opportunities] =
