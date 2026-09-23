@@ -6,19 +6,27 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton, useUser } from "@clerk/nextjs";
 import {
+  BarChart3,
   ChevronDown,
   ClipboardList,
+  Cog,
+  Eye,
   FileText,
   Gauge,
   Globe,
   Hexagon,
   LayoutDashboard,
   Lightbulb,
+  Link2,
+  Newspaper,
   Plus,
+  Quote,
+  Radar,
   Settings,
   Sparkles,
   Star,
   Swords,
+  Target,
   Wrench,
 } from "lucide-react";
 import { clerkDarkAppearance } from "@/lib/clerk-appearance";
@@ -26,6 +34,19 @@ import type { PlanId } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 
 type ProjectSummary = { id: string; name: string; status: string };
+
+/**
+ * A nav entry. `href` absent means the page does not exist yet: the item is
+ * rendered, so the shape of the product is visible, but it is not a link and
+ * carries a "Soon" tag. Navigating to a 404 is worse than saying "not yet".
+ */
+type NavItem = {
+  key: string;
+  label: string;
+  icon: typeof Globe;
+  href?: string;
+  exact?: boolean;
+};
 
 function projectIdFromPath(pathname: string) {
   const parts = pathname.split("/");
@@ -45,27 +66,63 @@ export function Sidebar({ plan }: { plan: PlanId }) {
     { href: "/projects/new", label: "Add project", icon: Plus, exact: true },
   ];
 
-  const primaryItems = projectBase
+  const seoItems: NavItem[] = projectBase
     ? [
-        { href: projectBase, label: "Overview", icon: Hexagon, exact: true },
-        { href: `${projectBase}/pages`, label: "Pages", icon: FileText, exact: false },
-        { href: `${projectBase}/performance`, label: "Performance", icon: Gauge, exact: false },
-        { href: `${projectBase}/competitors`, label: "Competitors", icon: Swords, exact: false },
-        { href: `${projectBase}/opportunities`, label: "Opportunities", icon: Lightbulb, exact: false },
+        { key: "pages", href: `${projectBase}/pages`, label: "Pages", icon: FileText },
+        { key: "technical", label: "Technical SEO", icon: Cog },
+        { key: "content", label: "Content", icon: Newspaper },
+        { key: "performance", href: `${projectBase}/performance`, label: "Performance", icon: Gauge },
+        { key: "links", label: "Internal Links", icon: Link2 },
+        { key: "competitors", href: `${projectBase}/competitors`, label: "Competitors", icon: Swords },
+        {
+          key: "opportunities",
+          href: `${projectBase}/opportunities`,
+          label: "Opportunities",
+          icon: Lightbulb,
+        },
       ]
     : [];
 
-  const secondaryItems = projectBase
+  // Every entry is unbuilt today. Overview becomes a link when the AI Search
+  // readiness page ships; the rest follow their own stages.
+  const aiSearchItems: NavItem[] = projectBase
     ? [
-        { href: `${projectBase}/tools`, label: "Tools", icon: Wrench, exact: false },
-        { href: `${projectBase}/suggestions`, label: "AI Suggestions", icon: Sparkles, exact: false },
-        { href: `${projectBase}/reports`, label: "Reports", icon: ClipboardList, exact: false },
-        { href: `${projectBase}/settings`, label: "Settings", icon: Settings, exact: false },
+        // Not Hexagon: that already means the project Overview, and one glyph
+        // should not stand for two different destinations.
+        { key: "ai-overview", label: "Overview", icon: Radar },
+        { key: "ai-visibility", label: "AI Visibility", icon: Eye },
+        { key: "ai-citations", label: "AI Citations", icon: Quote },
+        { key: "ai-competitors", label: "AI Competitors", icon: Swords },
+        { key: "geo-opportunities", label: "GEO Opportunities", icon: Target },
       ]
     : [];
 
-  function isActive(href: string, exact: boolean) {
+  const secondaryItems: NavItem[] = projectBase
+    ? [
+        { key: "tools", href: `${projectBase}/tools`, label: "Tools", icon: Wrench },
+        { key: "suggestions", href: `${projectBase}/suggestions`, label: "AI Suggestions", icon: Sparkles },
+        { key: "reports", href: `${projectBase}/reports`, label: "Reports", icon: ClipboardList },
+        { key: "settings", href: `${projectBase}/settings`, label: "Settings", icon: Settings },
+      ]
+    : [];
+
+  function isActive(href: string, exact = false) {
     return exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+  }
+
+  function hasActiveChild(items: NavItem[]) {
+    return items.some((item) => item.href != null && isActive(item.href, item.exact));
+  }
+
+  // A group opens itself when the current page is inside it, but an explicit
+  // toggle wins from then on — otherwise navigating would keep reopening a
+  // group the person just closed.
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  const seoOpen = toggled.seo ?? hasActiveChild(seoItems);
+  const aiOpen = toggled.ai ?? hasActiveChild(aiSearchItems);
+
+  function toggleGroup(key: string, open: boolean) {
+    setToggled((current) => ({ ...current, [key]: open }));
   }
 
   return (
@@ -106,18 +163,37 @@ export function Sidebar({ plan }: { plan: PlanId }) {
 
         {projectBase ? (
           <NavSection label="Project" className="mt-5">
-            {primaryItems.map((item) => (
-              <NavLink key={item.href} href={item.href} active={isActive(item.href, item.exact)}>
-                <item.icon className="size-3.5 shrink-0" aria-hidden />
-                {item.label}
-              </NavLink>
-            ))}
+            <NavLink href={projectBase} active={isActive(projectBase, true)}>
+              <Hexagon className="size-3.5 shrink-0" aria-hidden />
+              Overview
+            </NavLink>
+
+            <NavGroup
+              label="SEO"
+              icon={BarChart3}
+              open={seoOpen}
+              onToggle={() => toggleGroup("seo", !seoOpen)}
+            >
+              {seoItems.map((item) => (
+                <NavItemRow key={item.key} item={item} isActive={isActive} />
+              ))}
+            </NavGroup>
+
+            <NavGroup
+              label="AI Search"
+              icon={Sparkles}
+              badge="New"
+              open={aiOpen}
+              onToggle={() => toggleGroup("ai", !aiOpen)}
+            >
+              {aiSearchItems.map((item) => (
+                <NavItemRow key={item.key} item={item} isActive={isActive} />
+              ))}
+            </NavGroup>
+
             <div className="mt-3 flex flex-col gap-0.5">
               {secondaryItems.map((item) => (
-                <NavLink key={item.href} href={item.href} active={isActive(item.href, item.exact)}>
-                  <item.icon className="size-3.5 shrink-0" aria-hidden />
-                  {item.label}
-                </NavLink>
+                <NavItemRow key={item.key} item={item} isActive={isActive} />
               ))}
             </div>
           </NavSection>
@@ -301,6 +377,104 @@ function NavSection({
       <p className="px-2.5 pb-1.5 text-[11px] leading-4 text-muted-soft">{label}</p>
       {children}
     </nav>
+  );
+}
+
+/**
+ * A collapsible group of nav items.
+ *
+ * The header is a button rather than a link: it owns disclosure, not
+ * navigation. Its `aria-expanded` and `aria-controls` are what let a screen
+ * reader announce the group as open or closed.
+ */
+function NavGroup({
+  label,
+  icon: Icon,
+  badge,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  icon: typeof Globe;
+  badge?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const contentId = useId();
+
+  return (
+    <div className="mt-0.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={onToggle}
+        className={cn(
+          "cursor-pointer flex h-9 w-full items-center gap-2 rounded-full px-2.5",
+          "text-left text-[13px] font-medium text-muted-foreground",
+          "hover:bg-surface-soft hover:text-ink",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        <Icon className="size-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {badge ? (
+          <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold leading-4 text-primary">
+            {badge}
+          </span>
+        ) : null}
+        <ChevronDown
+          className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-180")}
+          aria-hidden
+        />
+      </button>
+
+      {/*
+        Always rendered so `aria-controls` resolves to the real content, and
+        toggled with a display utility rather than the `hidden` attribute —
+        Tailwind's `flex` utility would otherwise win over `[hidden]` and the
+        group would never collapse.
+      */}
+      <div
+        id={contentId}
+        className={cn(
+          "ml-4 flex-col gap-0.5 border-l border-hairline pl-2",
+          open ? "mt-0.5 flex" : "hidden",
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Renders a nav entry as a link, or as a non-interactive "Soon" row. */
+function NavItemRow({
+  item,
+  isActive,
+}: {
+  item: NavItem;
+  isActive: (href: string, exact?: boolean) => boolean;
+}) {
+  if (!item.href) {
+    return (
+      <span className="flex h-9 items-center gap-2 rounded-full px-2.5 text-[13px] font-medium text-muted-soft">
+        <item.icon className="size-3.5 shrink-0 opacity-70" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        <span className="shrink-0 rounded-full bg-surface-card px-1.5 py-0.5 text-[11px] font-medium leading-4 text-muted-soft">
+          Soon
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <NavLink href={item.href} active={isActive(item.href, item.exact)}>
+      <item.icon className="size-3.5 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+    </NavLink>
   );
 }
 
