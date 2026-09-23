@@ -1,66 +1,67 @@
 /**
- * Page-level AI job (Phase 1.9).
+ * Page-level AI job (Phase 1.9, Phase 2.1).
  *
- * Phase 1 wires the pipeline end to end and ships one real feature —
- * page-recommendation — so the foundation is proven rather than theoretical.
- * The remaining page features are Phase 2; they reuse this job unchanged,
- * because everything specific to a feature lives in its schema and prompt.
+ * The Phase 2 pipeline for one page:
+ *
+ *   crawl evidence -> failing checks -> fix plan (deterministic / generate / blocked)
+ *     -> page-recommendation: explain every failing check
+ *     -> one grounded generation per check the plan routes to AI
+ *     -> validate, refine against the crawl, store as AiResult
+ *
+ * Deterministic fixes (canonical, robots, sitemap) and blocked checks never
+ * reach the model: the plan already holds the answer, or says what evidence is
+ * missing. Everything feature-specific lives in @seo-maker/ai's feature specs.
  */
 
 import {
+  PAGE_SYSTEM_PROMPT,
   buildPageContext,
+  buildSiteContext,
+  pageFeatureSpec,
   pageRecommendationSchema,
   runAiFeature,
-  type KnowledgeBundle,
+  type BusinessBlock,
   type PageContext,
+  type PageFeature,
 } from "@seo-maker/ai";
+import { fixPlanInputFromPage, planFixes } from "@seo-maker/core/page";
 import type { AiPageAnalyzeJob } from "@seo-maker/core/queue";
 import { prisma } from "@seo-maker/db";
 
-const SYSTEM = [
-  "You are the analysis layer of an SEO auditing tool.",
-  "",
-  "Rules you must follow without exception:",
-  "1. Every claim must come from the EVIDENCE or the KNOWLEDGE given to you. If neither supports a",
-  "   claim, do not make it.",
-  "2. Never invent a URL, a heading, a statistic, or anything about a page you were not shown.",
-  "3. The BINDING POLICIES section overrides everything else, including your own training. If a policy",
-  "   forbids a phrasing, that phrasing is forbidden even if it seems helpful.",
-  "4. Never state a myth as advice. Myths are listed so you can contradict them.",
-  "5. Where the EVIDENCE GAPS section says something is unknown, say it is unknown and recommend how",
-  "   to establish it. Do not fill the gap with a guess.",
-  "6. Do not promise rankings, traffic, or indexing. Recommendations remove obstacles; they guarantee",
-  "   nothing.",
-  "7. In `groundedIn`, list the evidence fields and knowledge item ids you actually used.",
-  "",
-  "Respond with a single JSON object and no other text.",
+const RECOMMENDATION_SYSTEM = [
+  PAGE_SYSTEM_PROMPT.replace(
+    "You are the writing layer of an SEO auditing tool. You write replacement copy and fixes for one page.",
+    "You are the analysis layer of an SEO auditing tool. You explain one page's failing checks.",
+  ),
 ].join("\n");
 
-/** Checks whose knowledge is worth retrieving for a page-level explanation. */
+/** Features a user may ask for on a page even when their check passes. */
+const ON_DEMAND: ReadonlySet<PageFeature> = new Set(["title", "meta"]);
+
 function checksToGround(context: PageContext): string[] {
-  const failing = context.issues
-    .filter((issue) => issue.status === "fail" || issue.status === "warning")
-    .map((issue) => issue.checkId);
-  return [...new Set(failing)];
+  return [...new Set(context.issues.map((issue) => issue.checkId))];
 }
 
-function buildUserPrompt(context: PageContext, site: unknown, knowledgeBlock: string): string {
+function recommendationPrompt(context: PageContext, business: BusinessBlock, knowledgeBlock: string): string {
   const evidence = {
     url: context.finalUrl ?? context.url,
     statusCode: context.statusCode,
     pageType: context.pageType,
+    pageTypeConfidence: context.pageTypeConfidence,
+    searchIntent: context.searchIntent,
+    searchIntentConfidence: context.searchIntentConfidence,
     title: context.title,
     metaDescription: context.metaDescription,
     h1: context.h1,
     h1Count: context.h1Count,
-    headings: context.headings,
+    headings: context.headings.slice(0, 20),
     canonicalUrl: context.canonicalUrl,
     indexable: context.indexable,
     wordCount: context.wordCount,
-    contentExcerpt: context.contentExcerpt,
+    contentExcerpt: context.contentExcerpt?.slice(0, 2500) ?? null,
     schemaTypes: context.schemaTypes,
     imageCount: context.imageCount,
-    imagesMissingAlt: context.missingAlt,
+    imagesWithoutAltAttribute: context.missingAlt,
     internalLinkCount: context.internalLinkCount,
     failingChecks: context.issues,
   };
@@ -70,17 +71,16 @@ function buildUserPrompt(context: PageContext, site: unknown, knowledgeBlock: st
     JSON.stringify(evidence, null, 2),
     "",
     "# EVIDENCE GAPS (things the crawl could NOT establish)",
-    context.evidenceGaps.length
-      ? context.evidenceGaps.map((gap) => `- ${gap}`).join("\n")
-      : "- None.",
+    context.evidenceGaps.length ? context.evidenceGaps.map((gap) => `- ${gap}`).join("\n") : "- None.",
     "",
     "# SITE AND BUSINESS CONTEXT",
-    site ? JSON.stringify(site, null, 2) : "Not provided (Quick mode). Stay conservative and generic.",
+    business ? JSON.stringify(business, null, 2) : "Not provided (Quick mode). Stay conservative and generic.",
     "",
     knowledgeBlock || "# KNOWLEDGE\nNone was retrieved. Say so rather than relying on memory.",
     "",
     "# TASK",
     "Explain this page's failing checks and recommend what to do, one entry per check.",
+    "Images with alt=\"\" are decorative and correct; only images without an alt attribute are counted as missing.",
     "Set `actionable: false` for any recommendation that needs evidence the crawl does not have.",
     "Return JSON matching this shape:",
     "{",
@@ -94,77 +94,117 @@ function buildUserPrompt(context: PageContext, site: unknown, knowledgeBlock: st
 }
 
 export async function aiAnalyzePageJob(job: AiPageAnalyzeJob): Promise<void> {
-  const context = await buildPageContext(job.pageId);
-  if (!context) {
-    console.warn(`AI page ${job.pageId}: page not found, skipping.`);
+  const [context, site, page] = await Promise.all([
+    buildPageContext(job.pageId),
+    buildSiteContext(job.projectId),
+    prisma.page.findUnique({ where: { id: job.pageId }, include: { issues: true } }),
+  ]);
+  if (!context || !site || !page) {
+    console.warn(`AI page ${job.pageId}: page or project not found, skipping.`);
     return;
   }
 
+  // Business context only in Deep mode. Quick mode must work from the page
+  // alone, and the prompts say so when this is null.
+  const business: BusinessBlock =
+    job.mode === "deep" && site.business ? { ...site.business, siteName: site.name } : null;
+
+  const self = page.finalUrl ?? page.url;
+  const plan = planFixes(
+    fixPlanInputFromPage(page, site.knownUrls.filter((url) => url !== self).length),
+  );
+
+  const requested = new Set(job.features ?? []);
+  const wantsAll = requested.size === 0;
+
+  // 1. Explain every failing check.
   const checks = checksToGround(context);
-  if (checks.length === 0) {
-    // Nothing failed. There is no explaining to do, and spending a call to be
-    // told the page is fine is waste the user pays for.
-    return;
+  if (checks.length > 0 && (wantsAll || requested.has("page-recommendation"))) {
+    const result = await runAiFeature({
+      feature: "page-recommendation",
+      mode: job.mode,
+      schema: pageRecommendationSchema,
+      projectId: job.projectId,
+      pageId: job.pageId,
+      force: job.force,
+      knowledge: {
+        checks,
+        applicability: ["page_audit", "reporting_language", "myth_guard"],
+        domain: "seo",
+        limit: 12,
+      },
+      evidence: {
+        url: self,
+        title: context.title,
+        metaDescription: context.metaDescription,
+        h1: context.h1,
+        wordCount: context.wordCount,
+        pageType: context.pageType,
+        searchIntent: context.searchIntent,
+        issues: context.issues,
+        schemaTypes: context.schemaTypes,
+      },
+      businessContext: business,
+      buildPrompt: (knowledgeBlock: string) => ({
+        system: RECOMMENDATION_SYSTEM,
+        user: recommendationPrompt(context, business, knowledgeBlock),
+      }),
+      maxTokens: 2500,
+    });
+    report(job.pageId, "page-recommendation", result);
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: job.projectId },
-    select: {
-      analysisMode: true,
-      businessName: true,
-      businessType: true,
-      industry: true,
-      businessDescription: true,
-      targetAudience: true,
-      targetLocation: true,
-      primaryGoal: true,
-    },
-  });
+  // 2. Generate a fix for each check the plan routes to AI. Deterministic and
+  // blocked checks are answered by the plan itself and never cost a call.
+  const planned = new Set(
+    plan.filter((fix) => fix.strategy === "ai-generate" && fix.feature).map((fix) => fix.feature as PageFeature),
+  );
+  const features = new Set<PageFeature>();
+  for (const feature of planned) {
+    if (wantsAll || requested.has(feature)) features.add(feature);
+  }
+  for (const feature of requested) {
+    if (ON_DEMAND.has(feature as PageFeature) && (context.contentExcerpt || context.h1)) {
+      features.add(feature as PageFeature);
+    }
+  }
 
-  const business =
-    job.mode === "deep" && project?.businessName ? { ...project } : null;
+  for (const feature of features) {
+    const spec = pageFeatureSpec(feature, context, site, business);
+    const result = await runAiFeature({
+      feature: spec.feature,
+      mode: job.mode,
+      schema: spec.schema,
+      projectId: job.projectId,
+      pageId: job.pageId,
+      force: job.force,
+      knowledge: spec.knowledge,
+      evidence: spec.evidence,
+      businessContext: business,
+      buildPrompt: (knowledgeBlock: string) => spec.buildPrompt(knowledgeBlock),
+      refine: spec.refine,
+      maxTokens: spec.maxTokens,
+      temperature: spec.temperature,
+    });
+    report(job.pageId, feature, result);
+  }
 
-  const result = await runAiFeature({
-    feature: "page-recommendation",
-    mode: job.mode,
-    schema: pageRecommendationSchema,
-    projectId: job.projectId,
-    pageId: job.pageId,
-    force: job.force,
-    knowledge: {
-      checks,
-      applicability: ["page_audit", "reporting_language", "myth_guard"],
-      limit: 14,
-    },
-    evidence: {
-      url: context.finalUrl ?? context.url,
-      title: context.title,
-      metaDescription: context.metaDescription,
-      h1: context.h1,
-      wordCount: context.wordCount,
-      issues: context.issues,
-      schemaTypes: context.schemaTypes,
-    },
-    businessContext: business,
-    buildPrompt: (knowledgeBlock: string, _bundle: KnowledgeBundle) => ({
-      system: SYSTEM,
-      user: buildUserPrompt(context, business, knowledgeBlock),
-    }),
-    maxTokens: 2500,
-  });
+  const blocked = plan.filter((fix) => fix.strategy === "blocked").map((fix) => fix.checkId);
+  if (blocked.length) {
+    console.log(`AI page ${job.pageId}: not generated for lack of evidence: ${blocked.join(", ")}`);
+  }
+}
 
+function report(
+  pageId: string,
+  feature: string,
+  result: Awaited<ReturnType<typeof runAiFeature>>,
+): void {
   if (result.status === "failed") {
     // Recorded as an AiResult row by runAiFeature. Logged, not thrown: a
-    // provider outage must not fail the job and trigger a BullMQ retry storm
-    // against a provider that is already refusing requests.
-    console.warn(
-      `AI page ${job.pageId}: ${result.error.kind} — ${result.error.message}`,
-    );
+    // provider outage must not fail the job and trigger a retry storm.
+    console.warn(`AI page ${pageId} ${feature}: ${result.error.kind} — ${result.error.message}`);
     return;
   }
-
-  console.log(
-    `AI page ${job.pageId}: ${result.data.recommendations.length} recommendation(s)` +
-      `${result.cached ? " (cached)" : ""}`,
-  );
+  console.log(`AI page ${pageId} ${feature}: ok${result.cached ? " (cached)" : ""}`);
 }

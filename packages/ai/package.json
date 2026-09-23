@@ -8,7 +8,8 @@
     "./provider": "./src/provider/index.ts",
     "./schemas": "./src/schemas/index.ts",
     "./knowledge": "./src/knowledge/index.ts",
-    "./context": "./src/context/index.ts"
+    "./context": "./src/context/index.ts",
+    "./features": "./src/features/page.ts"
   },
   "scripts": {
     "test": "vitest run",

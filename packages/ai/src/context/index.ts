@@ -11,7 +11,7 @@
  */
 
 import { prisma } from "@seo-maker/db";
-import type { PageEvidence } from "@seo-maker/core/page";
+import { type PageEvidence, describableMissingAltImages } from "@seo-maker/core/page";
 import type { KnowledgeBundle } from "../knowledge";
 
 export type PageContext = {
@@ -21,6 +21,9 @@ export type PageContext = {
   statusCode: number | null;
   pageType: string | null;
   pageTypeConfidence: number | null;
+  /** Phase 2.5, inferred from type and wording, with its confidence. */
+  searchIntent: string | null;
+  searchIntentConfidence: number | null;
   title: string | null;
   metaDescription: string | null;
   h1: string | null;
@@ -37,6 +40,11 @@ export type PageContext = {
   missingAlt: number | null;
   /** Only images we can actually describe, per Phase 0.3. */
   imagesWithContext: { src: string; alt: string | null; context: string }[];
+  /**
+   * Images with no alt attribute that carry a caption, nearby text or a
+   * filename: the only ones an alt suggestion may be written for.
+   */
+  imagesMissingAlt: { src: string; filename: string | null; context: string }[];
   internalLinkCount: number | null;
   outgoingLinks: { href: string; anchor: string }[];
   schemaTypes: string[];
@@ -72,6 +80,8 @@ export type SiteContext = {
   pageCount: number;
   /** URLs the crawl actually found. Internal-link suggestions must come from here. */
   knownUrls: string[];
+  /** The same pages with their titles, so link suggestions can match on topic. */
+  knownPages: { url: string; title: string | null; pageType: string | null }[];
 };
 
 const CONTENT_EXCERPT_CHARS = 6_000;
@@ -101,6 +111,10 @@ export async function buildPageContext(pageId: string): Promise<PageContext | nu
 
   const schemaTypes = [...new Set((evidence?.schema ?? []).flatMap((block) => block.types))];
 
+  const imagesMissingAlt = describableMissingAltImages(evidence)
+    .slice(0, MAX_IMAGES_IN_CONTEXT)
+    .map((image) => ({ src: image.src, filename: image.filename, context: image.context }));
+
   const context: PageContext = {
     pageId: page.id,
     url: page.url,
@@ -108,6 +122,8 @@ export async function buildPageContext(pageId: string): Promise<PageContext | nu
     statusCode: page.statusCode,
     pageType: page.pageType,
     pageTypeConfidence: page.pageTypeScore,
+    searchIntent: page.searchIntent,
+    searchIntentConfidence: page.searchIntentScore,
     title: page.title,
     metaDescription: page.metaDesc,
     h1: page.h1,
@@ -122,6 +138,7 @@ export async function buildPageContext(pageId: string): Promise<PageContext | nu
     imageCount: page.imageCount,
     missingAlt: page.missingAlt,
     imagesWithContext,
+    imagesMissingAlt,
     internalLinkCount: page.internalLinks,
     outgoingLinks,
     schemaTypes,
@@ -183,11 +200,19 @@ export async function buildSiteContext(projectId: string): Promise<SiteContext |
   const crawlId = project.latestCrawlId;
   const pages = await prisma.page.findMany({
     where: crawlId ? { projectId, crawlId } : { projectId },
-    select: { url: true, finalUrl: true },
+    select: { url: true, finalUrl: true, title: true, pageType: true, status: true },
     take: 500,
   });
 
-  const knownUrls = [...new Set(pages.flatMap((p) => [p.finalUrl ?? p.url]))];
+  const crawled = pages.filter((p) => p.status === "analyzed");
+  const knownUrls = [...new Set(crawled.map((p) => p.finalUrl ?? p.url))];
+  const seen = new Set<string>();
+  const knownPages = crawled.flatMap((p) => {
+    const url = p.finalUrl ?? p.url;
+    if (seen.has(url)) return [];
+    seen.add(url);
+    return [{ url, title: p.title, pageType: p.pageType }];
+  });
 
   const hasBusiness = Boolean(
     project.businessName ||
@@ -216,6 +241,7 @@ export async function buildSiteContext(projectId: string): Promise<SiteContext |
       : null,
     pageCount: pages.length,
     knownUrls,
+    knownPages,
   };
 }
 

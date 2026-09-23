@@ -13,11 +13,13 @@ export * from "./schemas";
 export * from "./knowledge";
 export * from "./context";
 export * from "./cache";
+export * from "./features/page";
 
 import { prisma } from "@seo-maker/db";
 import type { z } from "zod";
 import {
   PROMPT_VERSION,
+  estimateCost,
   loadAiConfig,
   resolveModel,
   type AiFeature,
@@ -54,6 +56,13 @@ export type RunAiFeatureInput<T> = {
   temperature?: number;
   /** Set true to bypass a cached result and regenerate. */
   force?: boolean;
+  /**
+   * Checks the schema cannot express, run after validation and before storage:
+   * "every link target is a crawled URL", "the JSON-LD names schema.org". May
+   * also trim the output (drop the one invented target, keep the rest). A
+   * failure is recorded as an invalid result, never stored as output.
+   */
+  refine?: (data: T) => { ok: true; data: T } | { ok: false; reason: string };
   signal?: AbortSignal;
   generateOptions?: GenerateOptions;
 };
@@ -100,10 +109,11 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
       // Re-validate: a schema can tighten between runs, and a cached result that
       // no longer satisfies the contract must not be served.
       const parsed = input.schema.safeParse(cached.output);
-      if (parsed.success) {
+      const refined = parsed.success ? (input.refine ? input.refine(parsed.data) : { ok: true as const, data: parsed.data }) : null;
+      if (refined?.ok) {
         return {
           status: "ok",
-          data: parsed.data,
+          data: refined.data,
           cached: true,
           aiResultId: cached.id,
           knowledgeVersion: bundle.knowledgeVersion,
@@ -132,6 +142,18 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
       input.generateOptions,
     );
 
+    let data = response.data;
+    if (input.refine) {
+      const refined = input.refine(data);
+      if (!refined.ok) {
+        throw new AiError("invalid-output", "Model output failed a grounding check.", {
+          detail: refined.reason,
+          retryable: false,
+        });
+      }
+      data = refined.data;
+    }
+
     const row = await prisma.aiResult.create({
       data: {
         projectId: input.projectId,
@@ -143,17 +165,18 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
         promptVersion: PROMPT_VERSION,
         knowledgeVersion: bundle.knowledgeVersion,
         inputHash,
-        output: response.data as object,
+        output: data as object,
         status: "ok",
         inputTokens: response.usage.input,
         outputTokens: response.usage.output,
+        estimatedCost: estimateCost(response.model, response.usage.input, response.usage.output),
       },
       select: { id: true },
     });
 
     return {
       status: "ok",
-      data: response.data,
+      data,
       cached: false,
       aiResultId: row.id,
       knowledgeVersion: bundle.knowledgeVersion,

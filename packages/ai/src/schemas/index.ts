@@ -84,6 +84,44 @@ export const metaSchema = z.object({
 });
 export type MetaSuggestion = z.infer<typeof metaSchema>;
 
+// ---------------------------------------------------------------- heading
+
+/** A top-level heading. Same shape as a title: current, suggestions, diagnosis. */
+export const headingSchema = z.object({
+  ...base,
+  current: z.string().max(400).nullable(),
+  suggestions: z.array(suggestion).min(1).max(3),
+  diagnosis: z.string().min(1).max(600),
+});
+export type HeadingSuggestion = z.infer<typeof headingSchema>;
+
+// ---------------------------------------------------------------- image alt
+
+/**
+ * Alt text for images the crawl could describe (Phase 0.3, 2.3).
+ *
+ * SEO Maker cannot see images. A suggestion may only come from a caption,
+ * nearby text or a filename, `basis` must say which, and `needsHumanReview` is
+ * forced true on the way in. Images the model cannot describe go in `skipped`
+ * with a reason instead of getting invented text.
+ */
+export const imageAltSchema = z.object({
+  ...base,
+  images: z
+    .array(
+      z.object({
+        src: z.string().min(1).max(500),
+        alt: z.string().min(1).max(250),
+        basis: z.enum(["caption", "surrounding-text", "filename"]),
+      }),
+    )
+    .max(15),
+  skipped: z
+    .array(z.object({ src: z.string().min(1).max(500), reason: z.string().min(1).max(300) }))
+    .max(15),
+});
+export type ImageAltSuggestion = z.infer<typeof imageAltSchema>;
+
 // ---------------------------------------------------------------- content
 
 export const contentSchema = z.object({
@@ -199,6 +237,8 @@ export const FEATURE_SCHEMAS = {
   "page-recommendation": pageRecommendationSchema,
   title: titleSchema,
   meta: metaSchema,
+  heading: headingSchema,
+  "image-alt": imageAltSchema,
   content: contentSchema,
   schema: schemaMarkupSchema,
   "internal-link": internalLinkSchema,

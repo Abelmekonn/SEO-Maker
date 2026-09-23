@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { loadAiConfig, resolveModel } from "./config";
+import { estimateCost, loadAiConfig, resolveModel } from "./config";
 
 const saved = { ...process.env };
 
@@ -39,10 +39,11 @@ describe("resolveModel", () => {
     expect(resolveModel({ feature: "title", mode: "quick", plan: "free" })).toBe("dev-model");
   });
 
-  it("routes premium plans to the premium model when one is configured", () => {
+  it("routes the agency plan to the premium model when one is configured", () => {
     process.env.AI_MODEL = "dev-model";
     process.env.AI_MODEL_PREMIUM = "strong-model";
-    expect(resolveModel({ feature: "title", mode: "quick", plan: "premium" })).toBe("strong-model");
+    expect(resolveModel({ feature: "title", mode: "quick", plan: "agency" })).toBe("strong-model");
+    expect(resolveModel({ feature: "title", mode: "quick", plan: "pro" })).toBe("dev-model");
   });
 
   it("leaves free plans on the development model even in deep mode", () => {
@@ -57,5 +58,26 @@ describe("resolveModel", () => {
     process.env.AI_MODEL_DEEP = "deep-model";
     delete process.env.AI_MODEL_PREMIUM;
     expect(resolveModel({ feature: "title", mode: "deep", plan: "pro" })).toBe("deep-model");
+  });
+});
+
+describe("estimateCost", () => {
+  it("prices tokens from the listed rate", () => {
+    delete process.env.AI_PRICE_INPUT_PER_M;
+    delete process.env.AI_PRICE_OUTPUT_PER_M;
+    // 6,000 in at $0.15/M + 1,000 out at $0.75/M
+    expect(estimateCost("openai/gpt-oss-120b", 6000, 1000)).toBeCloseTo(0.00165, 6);
+  });
+
+  it("returns null for an unknown model rather than guessing", () => {
+    expect(estimateCost("some/unknown-model", 1000, 1000)).toBeNull();
+  });
+
+  it("uses the environment override when both prices are set", () => {
+    process.env.AI_PRICE_INPUT_PER_M = "1";
+    process.env.AI_PRICE_OUTPUT_PER_M = "2";
+    expect(estimateCost("some/unknown-model", 1_000_000, 1_000_000)).toBe(3);
+    delete process.env.AI_PRICE_INPUT_PER_M;
+    delete process.env.AI_PRICE_OUTPUT_PER_M;
   });
 });
