@@ -94,10 +94,30 @@ export function Sidebar({ plan }: { plan: PlanId }) {
           label: "AI Readiness",
           icon: Gauge,
         },
-        { key: "ai-visibility", label: "AI Visibility", icon: Eye },
-        { key: "ai-citations", label: "AI Citations", icon: Quote },
-        { key: "ai-competitors", label: "AI Competitors", icon: Swords },
-        { key: "geo-opportunities", label: "GEO Opportunities", icon: Target },
+        {
+          key: "ai-visibility",
+          href: `${projectBase}/ai-search/visibility`,
+          label: "AI Visibility",
+          icon: Eye,
+        },
+        {
+          key: "ai-citations",
+          href: `${projectBase}/ai-search/citations`,
+          label: "AI Citations",
+          icon: Quote,
+        },
+        {
+          key: "ai-competitors",
+          href: `${projectBase}/ai-search/competitors`,
+          label: "AI Competitors",
+          icon: Swords,
+        },
+        {
+          key: "geo-opportunities",
+          href: `${projectBase}/ai-search/opportunities`,
+          label: "GEO Opportunities",
+          icon: Target,
+        },
       ]
     : [];
 

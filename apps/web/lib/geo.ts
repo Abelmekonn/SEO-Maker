@@ -25,6 +25,36 @@ export async function getLatestGeoAudit(projectId: string) {
   });
 }
 
+/** Open findings from the latest run, most urgent first. */
+export async function getGeoOpportunities(projectId: string, geoAuditId?: string) {
+  return prisma.geoOpportunity.findMany({
+    where: { projectId, ...(geoAuditId ? { geoAuditId } : {}) },
+    orderBy: [{ status: "asc" }, { priority: "desc" }],
+  });
+}
+
+export async function getCitationSignals(projectId: string, geoAuditId?: string) {
+  return prisma.aiCitationOpportunity.findMany({
+    where: { projectId, ...(geoAuditId ? { geoAuditId } : {}) },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+}
+
+/**
+ * Competitors, with whatever AI-search evidence exists for them.
+ *
+ * There is none today: GEO analysis only runs against the user's own site, so
+ * every AI column here is null and the page says so rather than reusing the
+ * SEO score under an AI heading.
+ */
+export async function getCompetitorsForAiSearch(projectId: string) {
+  return prisma.competitor.findMany({
+    where: { projectId, excluded: false },
+    orderBy: [{ pinned: "desc" }, { confidence: "desc" }, { createdAt: "asc" }],
+  });
+}
+
 export async function getGeoAuditHistory(projectId: string, take = 10) {
   return prisma.geoAudit.findMany({
     where: { projectId, status: { in: ["completed", "partial"] } },

@@ -6,3 +6,4 @@ export * from "./page-selection";
 export * from "./agents";
 export * from "./crawler-access";
 export * from "./readiness";
+export * from "./opportunities";

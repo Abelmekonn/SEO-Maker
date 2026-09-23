@@ -3,9 +3,12 @@ import {
   GEO_RULESET_VERSION,
   type GeoDimensionId,
   type NotMeasuredReason,
+  type CrawlerAccessResult,
+  type GeoOpportunityDraft,
   type SelectablePage,
   buildAiCrawlerMatrix,
   computeReadiness,
+  deriveAccessOpportunities,
   selectImportantPages,
 } from "@seo-maker/core/geo";
 import { type GeoAuditJob, type GeoPhase } from "@seo-maker/core/queue";
@@ -18,10 +21,11 @@ import { Prisma, prisma, resetGeoProgress, setGeoStatus, writeGeoPhase } from "@
  * pipeline uses: progress lives on the Project row, and "resume where it
  * failed" is just reading geoPhase.
  *
- * Only three phases are implemented today — select, crawler and score. The
- * other six write their dimensions as null with a reason, which `redistribute`
- * drops rather than scoring zero. That is why this ships useful before any of
- * the AI work exists, and why adding a phase later changes no other phase.
+ * Four phases are implemented today — select, crawler, opportunities and
+ * score. The other five write their dimensions as null with a reason, which
+ * `redistribute` drops rather than scoring zero. That is why this ships useful
+ * before any of the AI work exists, and why adding a phase later changes no
+ * other phase.
  */
 
 /** Dimensions no phase can measure yet, with the reason shown in the UI. */
@@ -58,7 +62,7 @@ export async function runGeoAuditJob(data: GeoAuditJob) {
     return;
   }
 
-  await resetGeoProgress(prisma, projectId, { status: "running", total: 3 });
+  await resetGeoProgress(prisma, projectId, { status: "running", total: 4 });
 
   const pages = await prisma.page.findMany({
     where: { crawlId: crawl.id },
@@ -129,6 +133,7 @@ export async function runGeoAuditJob(data: GeoAuditJob) {
   });
 
   const errors: string[] = [];
+  let access: CrawlerAccessResult | null = null;
   const measured: Record<GeoDimensionId, number | null> = {
     entityClarity: null,
     contentExtractability: null,
@@ -151,7 +156,7 @@ export async function runGeoAuditJob(data: GeoAuditJob) {
     // and indexability columns come back off the original rows.
     const byId = new Map(pages.map((page) => [page.id, page]));
 
-    const access = buildAiCrawlerMatrix({
+    access = buildAiCrawlerMatrix({
       robotsTxt: crawl.robotsTxt,
       robotsStatus: crawl.robotsTxt ? 200 : null,
       pages: selected.flatMap((page) => {
@@ -187,6 +192,48 @@ export async function runGeoAuditJob(data: GeoAuditJob) {
     errors.push(`crawler: ${message}`);
     reasons.push({ dimension: "aiCrawlerAccess", reason: "The accessibility check failed." });
     console.error(`GEO ${projectId}: crawler phase failed:`, message);
+  }
+
+  // --- opportunities ------------------------------------------------------
+  await phase(projectId, "opportunities");
+  let drafts: GeoOpportunityDraft[] = [];
+
+  try {
+    if (access) {
+      drafts = deriveAccessOpportunities(access, {
+        pageCount: selected.length,
+        pageIds: selected.map((page) => page.id),
+        pageUrls: selected.map((page) => page.url),
+      });
+    }
+
+    if (drafts.length > 0) {
+      await prisma.geoOpportunity.createMany({
+        data: drafts.map((draft) => ({
+          projectId,
+          geoAuditId: audit.id,
+          type: draft.type,
+          title: draft.title,
+          explanation: draft.explanation,
+          recommendedAction: draft.recommendedAction,
+          severity: draft.severity,
+          priority: draft.priority,
+          priorityBand: draft.priorityBand,
+          priorityParts: draft.priorityParts as unknown as Prisma.InputJsonValue,
+          estimatedEffort: draft.estimatedEffort,
+          dimension: draft.dimension,
+          affectedPageIds: draft.affectedPageIds as unknown as Prisma.InputJsonValue,
+          affectedUrls: draft.affectedUrls as unknown as Prisma.InputJsonValue,
+          evidence: draft.evidence as unknown as Prisma.InputJsonValue,
+          // Deterministic throughout: no model produced any of this copy.
+          aiUsed: false,
+        })),
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    errors.push(`opportunities: ${message}`);
+    console.error(`GEO ${projectId}: opportunities phase failed:`, message);
   }
 
   // --- score --------------------------------------------------------------
@@ -236,7 +283,7 @@ export async function runGeoAuditJob(data: GeoAuditJob) {
 
   console.log(
     `GEO ${projectId}: ${status}, readiness ${readiness.score ?? "not measured"}, ` +
-      `${readiness.notMeasured.length} dimension(s) unmeasured`,
+      `${readiness.notMeasured.length} dimension(s) unmeasured, ${drafts.length} opportunity(ies)`,
   );
 }
 

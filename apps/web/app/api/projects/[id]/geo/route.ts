@@ -34,7 +34,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const body = (await request.json().catch(() => null)) as { force?: unknown } | null;
   const force = body?.force === true;
 
-  await resetGeoProgress(prisma, project.id, { status: "queued", total: 3 });
+  await resetGeoProgress(prisma, project.id, { status: "queued", total: 4 });
 
   try {
     await enqueueGeoAudit({
