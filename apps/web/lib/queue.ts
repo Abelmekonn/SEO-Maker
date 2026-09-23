@@ -50,7 +50,7 @@ function redisUrl() {
 
 let connection: IORedis | null = null;
 
-/** One Redis connection shared by both queues. */
+/** One Redis connection shared by every queue. */
 function getConnection() {
   if (!connection) {
     connection = new IORedis(redisUrl(), { maxRetriesPerRequest: null });
@@ -76,6 +76,15 @@ function getCompetitorQueue() {
     });
   }
   return competitorQueue;
+}
+
+let geoQueue: Queue<GeoAuditJob> | null = null;
+
+function getGeoQueue() {
+  if (!geoQueue) {
+    geoQueue = new Queue<GeoAuditJob>(GEO_QUEUE, { connection: getConnection() });
+  }
+  return geoQueue;
 }
 
 export async function enqueueHomepageCrawl(data: CrawlHomepageJob) {
@@ -115,15 +124,6 @@ export async function enqueueCompetitorInsights(data: CompetitorInsightsJob) {
     removeOnComplete: 20,
     removeOnFail: 20,
   });
-}
-
-let geoQueue: Queue<GeoAuditJob> | null = null;
-
-function getGeoQueue() {
-  if (!geoQueue) {
-    geoQueue = new Queue<GeoAuditJob>(GEO_QUEUE, { connection: getConnection() });
-  }
-  return geoQueue;
 }
 
 /**
