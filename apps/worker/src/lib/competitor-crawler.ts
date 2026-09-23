@@ -317,7 +317,8 @@ function extractAudit(
     canonicalUrl,
     wordCount: countWords(content),
     imageCount: images.length,
-    missingAlt: images.filter((img) => !$(img).attr("alt")?.trim()).length,
+    // Same rule as our own pages: only an absent alt is missing; alt="" is decorative.
+    missingAlt: images.filter((img) => $(img).attr("alt") == null).length,
     internalLinks,
     schemaCount,
     xRobotsTag,

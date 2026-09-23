@@ -194,7 +194,11 @@ function extractImages($: CheerioApi, base: string) {
     const altAttr = element.attr("alt");
     const hasAltAttr = altAttr != null;
     const alt = clean(altAttr);
-    if (!alt) {
+    // Only an absent alt attribute is missing. `alt=""` is the correct markup
+    // for a decorative image, and counting it as missing made the check tell
+    // sites to add alt text to images that are marked up properly, which
+    // contradicted the evidence panel and the AI knowledge layer.
+    if (!hasAltAttr) {
       missingAlt += 1;
     }
 
