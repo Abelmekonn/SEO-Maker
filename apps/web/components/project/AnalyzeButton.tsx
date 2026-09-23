@@ -21,6 +21,7 @@ export function AnalyzeButton({
   appearance = "outline",
   disabledReason,
   force = false,
+  features,
 }: {
   projectId: string;
   pageId?: string;
@@ -28,6 +29,8 @@ export function AnalyzeButton({
   appearance?: "outline" | "primary";
   disabledReason?: string;
   force?: boolean;
+  /** Narrow the run to these features (Phase 2), e.g. ["title", "meta"]. */
+  features?: string[];
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -42,7 +45,7 @@ export function AnalyzeButton({
     const response = await fetch(`/api/projects/${projectId}/analyze`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pageId, force }),
+      body: JSON.stringify({ pageId, force, features }),
     });
     const data = (await response.json().catch(() => null)) as {
       error?: string;

@@ -1,8 +1,8 @@
+import type { ReactNode } from "react";
 import { Sparkles } from "lucide-react";
 import type { PageAiResult } from "@/lib/ai-results";
 import { AnalyzeButton } from "@/components/project/AnalyzeButton";
 import { UpgradePrompt } from "@/components/project/UpgradePrompt";
-import { cn } from "@/lib/utils";
 
 /**
  * Grounded AI output for one page (Phase 1).
@@ -16,12 +16,6 @@ import { cn } from "@/lib/utils";
  * than an error, because the user cannot tell "nothing to fix" from "it broke".
  */
 
-const SEVERITY_STYLE: Record<string, string> = {
-  critical: "bg-bad/15 text-bad",
-  high: "bg-bad/10 text-bad",
-  medium: "bg-warn/15 text-warn",
-  low: "bg-surface-card text-muted-foreground",
-};
 
 export function AiRecommendations({
   result,
@@ -30,6 +24,7 @@ export function AiRecommendations({
   aiEnabled,
   planAllowsAi = true,
   planLabel,
+  children,
 }: {
   result: PageAiResult | null;
   projectId: string;
@@ -38,6 +33,8 @@ export function AiRecommendations({
   /** False on plans without AI. The findings above stay fully visible. */
   planAllowsAi?: boolean;
   planLabel?: string;
+  /** The per-check fixes, rendered under the summary whether or not AI has run. */
+  children?: ReactNode;
 }) {
   const disabledReason = aiEnabled
     ? undefined
@@ -49,99 +46,81 @@ export function AiRecommendations({
         <div className="flex flex-col gap-1">
           <h2 className="flex items-center gap-2 font-display text-[22px] leading-tight tracking-[-0.4px] text-ink">
             <Sparkles className="size-4 text-brand-accent" aria-hidden />
-            AI analysis
+            Fixes
           </h2>
-          <p className="text-sm leading-6 text-body">
-            Explanations grounded in this page&apos;s evidence and the SEO knowledge base.
+          <p className="max-w-2xl text-sm leading-6 text-body">
+            Each failing check with its fix: taken from the crawl, written by AI from this
+            page&apos;s evidence and the SEO knowledge base, or withheld when the evidence is missing.
           </p>
         </div>
         {planAllowsAi ? (
-          <AnalyzeButton
-            projectId={projectId}
-            pageId={pageId}
-            label={result ? "Re-analyse" : "Analyse this page"}
-            disabledReason={disabledReason}
-            force={Boolean(result)}
-          />
+          <div className="flex flex-wrap items-start gap-3">
+            <AnalyzeButton
+              projectId={projectId}
+              pageId={pageId}
+              label="Suggest title & description"
+              disabledReason={disabledReason}
+              features={["title", "meta"]}
+              force
+            />
+            <AnalyzeButton
+              projectId={projectId}
+              pageId={pageId}
+              label={result ? "Re-analyse" : "Analyse this page"}
+              appearance="primary"
+              disabledReason={disabledReason}
+              force={Boolean(result)}
+            />
+          </div>
         ) : null}
       </div>
 
       {!planAllowsAi ? (
         <UpgradePrompt
-          title="AI explanations are a paid feature"
-          body="Your plan finds every problem on this page - the checks above are complete. Upgrade to get the explanation of why each one matters and what to change."
+          title="Exact errors and fixes are a paid feature"
+          body="Your plan finds every problem on this page - the checks above are complete. Upgrade to see the exact error, why it matters and a ready-to-use fix for each one."
           planLabel={planLabel}
         />
-      ) : !result ? (
-        <Empty>
-          No analysis has run for this page yet. Queue one to get explanations for the failing
-          checks above.
-        </Empty>
-      ) : result.status !== "ok" || !result.data ? (
-        <div className="flex flex-col gap-2 rounded-lg bg-surface-soft p-6 ring-1 ring-hairline">
-          <p className="text-sm font-medium text-ink">
-            {result.status === "invalid"
-              ? "The model returned output that did not match the contract."
-              : "The last analysis did not finish."}
-          </p>
-          <p className="text-sm leading-6 text-body">
-            {result.status === "invalid"
-              ? "It was rejected rather than stored, so nothing unverified reached this page. Try again."
-              : "Nothing was stored. You can queue it again."}
-          </p>
-          {result.error ? (
-            <p className="mt-1 break-words font-mono text-xs leading-5 text-muted-foreground">
-              {result.error}
-            </p>
-          ) : null}
-        </div>
       ) : (
-        <div className="flex flex-col gap-4">
-          <div className="rounded-lg bg-surface-soft p-6 ring-1 ring-hairline">
-            <p className="text-sm leading-6 text-body">{result.data.summary}</p>
-            {result.data.needsHumanReview ? (
-              <p className="mt-3 rounded-md bg-warn/10 px-3 py-2 text-xs leading-5 text-warn">
-                The model flagged this for human review. Check it before acting.
+        <>
+          {!result ? (
+            <Empty>
+              The AI has not explained this page yet. Fixes taken from the crawl are below already;
+              run the analysis for explanations and written suggestions.
+            </Empty>
+          ) : result.status !== "ok" || !result.data ? (
+            <div className="flex flex-col gap-2 rounded-lg bg-surface-soft p-6 ring-1 ring-hairline">
+              <p className="text-sm font-medium text-ink">
+                {result.status === "invalid"
+                  ? "The model returned output that did not match the contract."
+                  : "The last analysis did not finish."}
               </p>
-            ) : null}
-          </div>
-
-          <ul className="flex flex-col gap-3">
-            {result.data.recommendations.map((item, index) => (
-              <li
-                key={`${item.checkId}-${index}`}
-                className="flex flex-col gap-2 rounded-lg bg-surface-soft p-6 ring-1 ring-hairline"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-[12px] text-muted-foreground">
-                    {item.checkId}
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 font-mono text-[11px] leading-5",
-                      SEVERITY_STYLE[item.severity] ?? SEVERITY_STYLE.low,
-                    )}
-                  >
-                    {item.severity}
-                  </span>
-                  {!item.actionable ? (
-                    <span className="rounded-full bg-surface-card px-2 py-0.5 font-mono text-[11px] leading-5 text-muted-foreground">
-                      Needs more evidence
-                    </span>
-                  ) : null}
-                </div>
-
-                <p className="text-sm font-medium leading-6 text-ink">{item.issue}</p>
-                <p className="text-sm leading-6 text-body">{item.whyItMatters}</p>
-                <p className="mt-1 border-l-2 border-brand-accent/40 pl-3 text-sm leading-6 text-body">
-                  {item.action}
+              <p className="text-sm leading-6 text-body">
+                {result.status === "invalid"
+                  ? "It was rejected rather than stored, so nothing unverified reached this page. Try again."
+                  : "Nothing was stored. You can queue it again."}
+              </p>
+              {result.error ? (
+                <p className="mt-1 break-words font-mono text-xs leading-5 text-muted-foreground">
+                  {result.error}
                 </p>
-              </li>
-            ))}
-          </ul>
+              ) : null}
+            </div>
+          ) : (
+            <div className="rounded-lg bg-surface-soft p-6 ring-1 ring-hairline">
+              <p className="text-sm leading-6 text-body">{result.data.summary}</p>
+              {result.data.needsHumanReview ? (
+                <p className="mt-3 rounded-md bg-warn/10 px-3 py-2 text-xs leading-5 text-warn">
+                  The model flagged this for human review. Check it before acting.
+                </p>
+              ) : null}
+            </div>
+          )}
 
-          <Provenance result={result} />
-        </div>
+          {children}
+
+          {result?.status === "ok" && result.data ? <Provenance result={result} /> : null}
+        </>
       )}
     </section>
   );

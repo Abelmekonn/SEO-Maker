@@ -1,6 +1,6 @@
 import { prisma } from "@seo-maker/db";
 import type { PageRecommendation } from "@seo-maker/ai/schemas";
-import { pageRecommendationSchema } from "@seo-maker/ai/schemas";
+import { FEATURE_SCHEMAS, pageRecommendationSchema } from "@seo-maker/ai/schemas";
 
 /**
  * Reading the AI layer's output (Phase 1).
@@ -107,6 +107,58 @@ export async function getProjectRecommendations(
     }
   }
   return byPage;
+}
+
+/** The latest result of one generation feature (title, meta, schema...) for a page. */
+export type FeatureResult = {
+  id: string;
+  feature: string;
+  status: string;
+  mode: string;
+  model: string;
+  provider: string;
+  knowledgeVersion: string | null;
+  error: string | null;
+  createdAt: Date;
+  estimatedCost: number | null;
+  /** Re-validated against the feature's contract; null when failed or no longer valid. */
+  data: unknown;
+};
+
+/**
+ * Latest result per generation feature for one page (Phase 2.6).
+ *
+ * Same rule as page recommendations: stored output is re-validated against the
+ * current contract, and a row that no longer fits degrades to "no result"
+ * rather than rendering unchecked data.
+ */
+export async function getPageFeatureResults(pageId: string): Promise<Map<string, FeatureResult>> {
+  const rows = await prisma.aiResult.findMany({
+    where: { pageId, feature: { not: "page-recommendation" } },
+    orderBy: { createdAt: "desc" },
+    select: { ...SELECT, estimatedCost: true },
+  });
+
+  const byFeature = new Map<string, FeatureResult>();
+  for (const row of rows) {
+    if (byFeature.has(row.feature)) continue;
+    const schema = FEATURE_SCHEMAS[row.feature as keyof typeof FEATURE_SCHEMAS];
+    const parsed = row.status === "ok" && schema ? schema.safeParse(row.output) : null;
+    byFeature.set(row.feature, {
+      id: row.id,
+      feature: row.feature,
+      status: row.status,
+      mode: row.mode,
+      model: row.model,
+      provider: row.provider,
+      knowledgeVersion: row.knowledgeVersion,
+      error: row.error,
+      createdAt: row.createdAt,
+      estimatedCost: row.estimatedCost,
+      data: parsed?.success ? parsed.data : null,
+    });
+  }
+  return byFeature;
 }
 
 /**

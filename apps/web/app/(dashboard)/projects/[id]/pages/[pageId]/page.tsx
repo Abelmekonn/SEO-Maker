@@ -4,13 +4,16 @@ import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/dashboard/shell";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
+import { fixPlanInputFromPage, planFixes } from "@seo-maker/core/page";
+import { prisma } from "@seo-maker/db";
 import { AiRecommendations } from "@/components/project/AiRecommendations";
 import { PageChecks } from "@/components/project/PageChecks";
 import { PageEvidencePanel } from "@/components/project/PageEvidence";
+import { PageFixes } from "@/components/project/PageFixes";
 import { PremiumPage } from "@/components/project/PremiumGate";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { StatusBadge } from "@/components/project/StatusBadge";
-import { aiConfigured, getPageRecommendation } from "@/lib/ai-results";
+import { aiConfigured, getPageFeatureResults, getPageRecommendation } from "@/lib/ai-results";
 import { getAccountForUser } from "@/lib/plan";
 import { getPageForUser, latestPages, requireUserId } from "@/lib/projects";
 import { findHomepage, pagePath } from "@/lib/site-url";
@@ -32,10 +35,17 @@ export default async function ProjectPageDetailPage({
     notFound();
   }
 
-  const [recommendation, account] = await Promise.all([
+  const [recommendation, features, account, knownUrlCount] = await Promise.all([
     getPageRecommendation(page.id),
+    getPageFeatureResults(page.id),
     getAccountForUser(userId),
+    // The other crawled pages are the only valid internal-link targets, so the
+    // fix plan counts them the same way the worker does.
+    prisma.page.count({
+      where: { crawlId: page.crawlId, status: "analyzed", NOT: { id: page.id } },
+    }),
   ]);
+  const plan = planFixes(fixPlanInputFromPage(page, knownUrlCount));
   const liveUrl = page.finalUrl ?? page.url;
   const premium = account.plan !== "free";
 
@@ -74,6 +84,12 @@ export default async function ProjectPageDetailPage({
           <div className="flex flex-wrap items-center gap-3">
             <p className="break-all font-mono text-sm text-body">{liveUrl}</p>
             <StatusBadge status={page.status} />
+            {page.pageType ? (
+              <Inferred label="Type" value={page.pageType} confidence={page.pageTypeScore} />
+            ) : null}
+            {page.searchIntent ? (
+              <Inferred label="Intent" value={page.searchIntent} confidence={page.searchIntentScore} />
+            ) : null}
           </div>
         }
         description={`${page.project.name}. Every check the crawler ran on this page, failing ones first.`}
@@ -97,8 +113,30 @@ export default async function ProjectPageDetailPage({
         aiEnabled={aiConfigured()}
         planAllowsAi={account.limits.ai}
         planLabel={account.limits.label}
-      />
+      >
+        <PageFixes
+          plan={plan}
+          issues={page.issues}
+          recommendation={recommendation?.data ?? null}
+          features={features}
+        />
+      </AiRecommendations>
       {premium ? <PageEvidencePanel page={page} /> : null}
     </div>
+  );
+}
+
+/** A classification the crawler inferred, shown with how sure it is. */
+function Inferred({ label, value, confidence }: { label: string; value: string; confidence: number | null }) {
+  const pct = confidence == null ? null : Math.round(confidence * 100);
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full bg-surface-card px-2.5 py-1 font-mono text-[12px] leading-4 text-body"
+      title={pct == null ? undefined : `Inferred from the page, ${pct}% confidence`}
+    >
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-ink">{value}</span>
+      {pct != null ? <span className={pct < 50 ? "text-warn" : "text-muted-foreground"}>{pct}%</span> : null}
+    </span>
   );
 }

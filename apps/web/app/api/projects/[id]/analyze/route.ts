@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { AI_PAGE_FEATURES, type AiPageFeature } from "@seo-maker/core/queue";
 import { prisma } from "@seo-maker/db";
 import { aiConfigured } from "@/lib/ai-results";
 import { getAccountForUser } from "@/lib/plan";
@@ -8,9 +9,11 @@ import { enqueueAiPageAnalysis } from "@/lib/queue";
 /**
  * Queues grounded AI analysis (Phase 1.9).
  *
- * Body: `{ pageId?: string, force?: boolean }`. With a pageId it analyses that
- * page; without one it queues every crawled page in the latest crawl that has
- * something to explain.
+ * Body: `{ pageId?: string, force?: boolean, features?: AiPageFeature[] }`.
+ * With a pageId it analyses that page; without one it queues every crawled
+ * page in the latest crawl that has something to explain. `features` narrows
+ * the run (Phase 2); omitted, the worker explains every failing check and
+ * generates a fix for each one the fix plan routes to AI.
  *
  * Pages with no failing checks are skipped rather than queued. The worker would
  * return early on them anyway, and queuing work that is guaranteed to no-op
@@ -52,7 +55,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const body = (await request.json().catch(() => ({}))) as {
     pageId?: string;
     force?: boolean;
+    features?: unknown;
   };
+
+  const allowed = new Set<string>(AI_PAGE_FEATURES);
+  const features = Array.isArray(body.features)
+    ? (body.features.filter((value) => typeof value === "string" && allowed.has(value)) as AiPageFeature[])
+    : undefined;
+  if (Array.isArray(body.features) && features?.length === 0) {
+    return NextResponse.json({ error: "No valid features requested." }, { status: 400 });
+  }
+  // Title and meta can be rewritten on request even when their check passes.
+  const onDemand = Boolean(body.pageId && features?.some((feature) => feature === "title" || feature === "meta"));
 
   const mode = project.analysisMode === "deep" ? "deep" : "quick";
 
@@ -72,7 +86,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   });
   const analysable = new Set(withIssues.map((row) => row.pageId));
 
-  const targets = candidates.filter((page) => analysable.has(page.id));
+  const targets = candidates.filter((page) => analysable.has(page.id) || onDemand);
 
   if (targets.length === 0) {
     return NextResponse.json({
@@ -89,6 +103,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           projectId: project.id,
           pageId: page.id,
           mode,
+          features,
           force: body.force ?? false,
         }),
       ),
