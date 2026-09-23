@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import Link from "next/link";
 import type { Competitor, GeoOpportunity } from "@seo-maker/db";
 import {
@@ -13,7 +12,12 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { ScoreRing } from "@/components/project/ScoreRing";
+import {
+  MetricCard,
+  Panel,
+  SeverityBadge,
+  TrendFrame,
+} from "@/components/project/geo/board-primitives";
 import { cn } from "@/lib/utils";
 
 /**
@@ -64,7 +68,10 @@ export function AiVisibilityBoard({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <section aria-label="Visibility metrics" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section
+        aria-label="Visibility metrics"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
+      >
         <MetricCard
           icon={Eye}
           label="AI visibility rate"
@@ -76,7 +83,11 @@ export function AiVisibilityBoard({
           label="Brand mentions"
           hint="Answers that name this business"
         />
-        <MetricCard icon={Quote} label="Citations" hint="Answers citing a page as a source" />
+        <MetricCard
+          icon={Quote}
+          label="Citations"
+          hint="Answers citing a page as a source"
+        />
         <MetricCard
           icon={BadgeCheck}
           label="Correct representation"
@@ -89,98 +100,137 @@ export function AiVisibilityBoard({
         />
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(300px,340px)]">
-        <Panel title="Visibility trends" tabs={["AI visibility", "Mentions", "Citations", "Competitors"]}>
-          <TrendPlaceholder />
-        </Panel>
+      {/*
+        Two rows of two on the left, rail on the right.
 
-        <Panel title="Visibility by platform">
-          <ul className="flex flex-col gap-3">
-            {PLATFORMS.map((platform) => (
-              <li key={platform.key} className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <Bot className="size-3.5 shrink-0 text-muted-soft" aria-hidden />
-                    <span className="truncate text-[12px] font-medium text-ink">
-                      {platform.label}
-                    </span>
-                  </span>
-                  <span className="shrink-0 font-mono text-[12px] text-muted-soft">
-                    Not tracked
-                  </span>
-                </div>
-                <span className="h-1.5 rounded-full bg-surface-card" />
-              </li>
-            ))}
-          </ul>
-          <p className="mt-1 text-[11px] leading-4 text-muted-soft">
-            Each platform answers differently, so visibility is measured per platform rather than
-            averaged into one figure.
-          </p>
-        </Panel>
+        `flex-1 min-w-0` rather than `w-full` for the growing panel: a flex
+        child at 100% overflows first and is only pulled back by shrink, which
+        happens to look right but collapses the moment a table inside refuses to
+        shrink. `shrink-0` on the fixed panels, because a width alone does not
+        hold under pressure.
+      */}
+      <div className="flex flex-col gap-4 xl:flex-row">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <Panel
+              title="Visibility trends"
+              tabs={["AI visibility", "Mentions", "Citations", "Competitors"]}
+              className="min-w-0 flex-1"
+            >
+              <TrendFrame
+                title="No visibility history"
+                body="A trend needs prompts run on more than one day. Nothing is recorded yet, so there is nothing to plot."
+              />
+            </Panel>
 
-        <OverviewRail configured={configured} projectId={projectId} />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <Panel
-          title="AI responses & citations"
-          tabs={PLATFORMS.map((platform) => platform.label)}
-        >
-          <div className="overflow-hidden rounded-lg ring-1 ring-hairline">
-            <table className="w-full border-collapse text-left">
-              <thead>
-                <tr className="bg-canvas">
-                  {PROMPT_COLUMNS.map((column) => (
-                    <th
-                      key={column}
-                      scope="col"
-                      className="px-3 py-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-soft"
-                    >
-                      {column}
-                    </th>
+              <Panel title="Visibility by platform" className="lg:w-[340px] lg:shrink-0">
+                <ul className="flex h-full flex-col gap-3">
+                  {PLATFORMS.map((platform) => (
+                    <li key={platform.key} className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Bot
+                            className="size-3.5 shrink-0 text-muted-soft"
+                            aria-hidden
+                          />
+                          <span className="truncate text-[12px] font-medium text-ink">
+                            {platform.label}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-mono text-[12px] text-muted-soft">
+                          Not tracked
+                        </span>
+                      </div>
+                      <span className="h-1.5 rounded-full bg-surface-card" />
+                    </li>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colSpan={PROMPT_COLUMNS.length} className="px-3 py-8 text-center">
-                    <p className="text-[12px] font-medium text-ink">No prompts have been run</p>
-                    <p className="mx-auto mt-1 max-w-md text-[11px] leading-4 text-muted-soft">
-                      Each row will be one real question put to one assistant, with the answer it
-                      gave and the sources it cited.
-                    </p>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </ul>
+                <p className="mt-1 text-[11px] leading-4 text-muted-soft">
+                  Each platform answers differently, so visibility is measured per
+                  platform rather than averaged into one figure.
+                </p>
+              </Panel>
           </div>
-        </Panel>
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <Panel
+              title="AI responses & citations"
+              tabs={PLATFORMS.map((platform) => platform.label)}
+              className="min-w-0 flex-1"
+            >
+              {/* The table has six columns and will not fit a narrow rail, so
+                  it scrolls inside its panel rather than stretching the row. */}
+              <div className="overflow-x-auto rounded-lg ring-1 ring-hairline">
+                <table className="w-full min-w-[640px] border-collapse text-left">
+                  <thead>
+                    <tr className="bg-canvas">
+                      {PROMPT_COLUMNS.map((column) => (
+                        <th
+                          key={column}
+                          scope="col"
+                          className="px-3 py-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-soft"
+                        >
+                          {column}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td
+                        colSpan={PROMPT_COLUMNS.length}
+                        className="px-3 py-8 text-center"
+                      >
+                        <p className="text-[12px] font-medium text-ink">
+                          No prompts have been run
+                        </p>
+                        <p className="mx-auto mt-1 max-w-md text-[11px] leading-4 text-muted-soft">
+                          Each row will be one real question put to one
+                          assistant, with the answer it gave and the sources it
+                          cited.
+                        </p>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
 
-        <Panel title="AI competitors">
-          {competitors.length === 0 ? (
-            <p className="rounded-lg bg-canvas px-4 py-3 text-[12px] leading-5 text-muted-soft ring-1 ring-hairline">
-              No competitors tracked yet.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {competitors.slice(0, 6).map((competitor) => (
-                <CompetitorLine key={competitor.id} domain={competitor.domain} />
-              ))}
-              <CompetitorLine domain={domain} self />
-            </ul>
-          )}
-          <p className="mt-1 text-[11px] leading-4 text-muted-soft">
-            Mentions and citations for each domain need prompt runs. Their SEO scores are on the
-            Competitors page and are a different measurement.
-          </p>
-        </Panel>
+            <Panel title="AI competitors" className="lg:w-[340px] lg:shrink-0">
+              {competitors.length === 0 ? (
+                <p className="rounded-lg bg-canvas px-4 py-3 text-[12px] leading-5 text-muted-soft ring-1 ring-hairline">
+                  No competitors tracked yet.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {competitors.slice(0, 6).map((competitor) => (
+                    <CompetitorLine
+                      key={competitor.id}
+                      domain={competitor.domain}
+                    />
+                  ))}
+                  <CompetitorLine domain={domain} self />
+                </ul>
+              )}
+              <p className="mt-1 text-[11px] leading-4 text-muted-soft">
+                Mentions and citations for each domain need prompt runs. Their
+                SEO scores are on the Competitors page and are a different
+                measurement.
+              </p>
+            </Panel>
+          </div>
+        </div>
+        <OverviewRail
+          configured={configured}
+          projectId={projectId}
+          className="xl:w-[340px] xl:shrink-0"
+        />
       </div>
-
       <section className="flex flex-col gap-3 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <h2 className="text-[13px] font-semibold text-ink">GEO opportunities</h2>
+            <h2 className="text-[13px] font-semibold text-ink">
+              GEO opportunities
+            </h2>
             <span className="rounded-full bg-surface-card px-2 py-0.5 text-[11px] font-medium leading-4 text-muted-soft">
               Rule-based
             </span>
@@ -196,8 +246,9 @@ export function AiVisibilityBoard({
 
         {opportunities.length === 0 ? (
           <p className="rounded-lg bg-canvas px-4 py-3 text-[12px] leading-5 text-muted-soft ring-1 ring-hairline">
-            No findings from the last analysis. These come from the readiness checks, not from
-            prompt runs, so they are available without a provider.
+            No findings from the last analysis. These come from the readiness
+            checks, not from prompt runs, so they are available without a
+            provider.
           </p>
         ) : (
           <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -212,7 +263,9 @@ export function AiVisibilityBoard({
                     {Math.round(row.priority)}
                   </span>
                 </div>
-                <p className="text-[12px] font-medium leading-5 text-ink">{row.title}</p>
+                <p className="text-[12px] font-medium leading-5 text-ink">
+                  {row.title}
+                </p>
                 <p className="line-clamp-2 text-[11px] leading-4 text-muted-soft">
                   {row.recommendedAction}
                 </p>
@@ -231,101 +284,25 @@ export function AiVisibilityBoard({
   );
 }
 
-function MetricCard({
-  icon: Icon,
-  label,
-  hint,
-  ring = false,
+
+
+
+function OverviewRail({
+  configured,
+  projectId,
+  className,
 }: {
-  icon: typeof Eye;
-  label: string;
-  hint: string;
-  ring?: boolean;
+  configured: boolean;
+  projectId: string;
+  className?: string;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <Icon className="size-4 shrink-0" aria-hidden />
-        <span className="truncate text-[12px] font-medium">{label}</span>
-      </div>
-      <div className="flex items-center gap-3">
-        {ring ? <ScoreRing score={null} size={48} strokeWidth={5} label={label} /> : null}
-        <div className="min-w-0">
-          {/* An em dash, never a zero: nothing has been measured, and zero is a
-              measurement. */}
-          <p className="font-display text-[24px] leading-none text-muted-soft">&mdash;</p>
-          <p className="mt-1.5 text-[11px] leading-4 text-muted-soft">Not tracked yet</p>
-        </div>
-      </div>
-      <p className="text-[11px] leading-4 text-muted-soft">{hint}</p>
-    </div>
-  );
-}
-
-function Panel({
-  title,
-  tabs,
-  children,
-}: {
-  title: string;
-  tabs?: string[];
-  children: ReactNode;
-}) {
-  return (
-    <section className="flex min-w-0 flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-[13px] font-semibold text-ink">{title}</h2>
-        {tabs ? (
-          <div className="flex flex-wrap gap-1">
-            {tabs.map((tab, index) => (
-              <span
-                key={tab}
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-[11px] font-medium leading-4",
-                  index === 0
-                    ? "bg-surface-card text-muted-foreground"
-                    : "text-muted-soft",
-                )}
-              >
-                {tab}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** The chart frame, drawn empty. Shows the shape without implying a reading. */
-function TrendPlaceholder() {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="relative h-52 overflow-hidden rounded-lg bg-canvas ring-1 ring-hairline">
-        <div aria-hidden className="absolute inset-0 flex flex-col justify-between p-4">
-          {[0, 1, 2, 3, 4].map((line) => (
-            <span key={line} className="h-px w-full bg-hairline/60" />
-          ))}
-        </div>
-        <div className="relative flex h-full flex-col items-center justify-center px-6 text-center">
-          <p className="text-[12px] font-medium text-ink">No visibility history</p>
-          <p className="mt-1 max-w-sm text-[11px] leading-4 text-muted-soft">
-            A trend needs prompts run on more than one day. Nothing is recorded yet, so there is
-            nothing to plot.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function OverviewRail({ configured, projectId }: { configured: boolean; projectId: string }) {
-  return (
-    <section className="flex min-w-0 flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
+    <section className={cn("flex min-w-0 flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline", className)}>
       <div className="flex items-center gap-2">
         <Sparkles className="size-4 shrink-0 text-primary" aria-hidden />
-        <h2 className="text-[13px] font-semibold text-ink">AI visibility overview</h2>
+        <h2 className="text-[13px] font-semibold text-ink">
+          AI visibility overview
+        </h2>
       </div>
 
       <p className="text-[13px] leading-6 text-body">
@@ -337,15 +314,21 @@ function OverviewRail({ configured, projectId }: { configured: boolean; projectI
       {/* The caveat is permanent, not a placeholder: it stays true once the
           numbers are real. */}
       <div className="flex gap-2 rounded-lg bg-canvas px-3 py-2.5 ring-1 ring-hairline">
-        <Info className="mt-0.5 size-3.5 shrink-0 text-muted-soft" aria-hidden />
+        <Info
+          className="mt-0.5 size-3.5 shrink-0 text-muted-soft"
+          aria-hidden
+        />
         <p className="text-[11px] leading-4 text-muted-soft">
-          AI answers vary by question, platform and time. Visibility here is what was observed on
-          the prompts that were run — not a guarantee of placement, and not a ranking.
+          AI answers vary by question, platform and time. Visibility here is
+          what was observed on the prompts that were run — not a guarantee of
+          placement, and not a ranking.
         </p>
       </div>
 
       <div className="flex flex-col gap-2 border-t border-hairline pt-3">
-        <p className="text-[11px] uppercase tracking-wide text-muted-soft">Available now</p>
+        <p className="text-[11px] uppercase tracking-wide text-muted-soft">
+          Available now
+        </p>
         <RailLink
           href={`/projects/${projectId}/ai-search/readiness`}
           icon={Lightbulb}
@@ -382,13 +365,21 @@ function RailLink({
       <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-soft" aria-hidden />
       <span className="min-w-0">
         <span className="block text-[12px] font-medium text-ink">{title}</span>
-        <span className="block text-[11px] leading-4 text-muted-soft">{body}</span>
+        <span className="block text-[11px] leading-4 text-muted-soft">
+          {body}
+        </span>
       </span>
     </Link>
   );
 }
 
-function CompetitorLine({ domain, self = false }: { domain: string; self?: boolean }) {
+function CompetitorLine({
+  domain,
+  self = false,
+}: {
+  domain: string;
+  self?: boolean;
+}) {
   return (
     <li
       className={cn(
@@ -398,29 +389,15 @@ function CompetitorLine({ domain, self = false }: { domain: string; self?: boole
     >
       <span className="min-w-0 truncate font-mono text-[12px] text-ink">
         {domain}
-        {self ? <span className="ml-1.5 text-[11px] text-primary">You</span> : null}
+        {self ? (
+          <span className="ml-1.5 text-[11px] text-primary">You</span>
+        ) : null}
       </span>
-      <span className="shrink-0 font-mono text-[11px] text-muted-soft">Not tracked</span>
+      <span className="shrink-0 font-mono text-[11px] text-muted-soft">
+        Not tracked
+      </span>
     </li>
   );
 }
 
-const severityTone: Record<string, string> = {
-  critical: "bg-bad/15 text-bad",
-  high: "bg-warn/15 text-warn",
-  medium: "bg-warn/15 text-warn",
-  low: "bg-surface-card text-muted-foreground",
-};
 
-function SeverityBadge({ severity }: { severity: string }) {
-  return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[11px] font-medium capitalize leading-4",
-        severityTone[severity] ?? severityTone.low,
-      )}
-    >
-      {severity}
-    </span>
-  );
-}

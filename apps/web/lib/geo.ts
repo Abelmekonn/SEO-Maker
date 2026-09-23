@@ -45,6 +45,21 @@ export async function getGeoOpportunities(projectId: string, geoAuditId?: string
   });
 }
 
+/**
+ * The pages an assistant would most plausibly reach, from the latest crawl.
+ *
+ * Ranked by depth then inbound-ish signal, which is a reachability proxy — not
+ * a record of anything having been cited.
+ */
+export async function getTopPages(projectId: string, crawlId: string | null, take = 6) {
+  if (!crawlId) return [];
+  return prisma.page.findMany({
+    where: { crawlId, status: "analyzed" },
+    orderBy: [{ depth: "asc" }, { internalLinks: "desc" }],
+    take,
+  });
+}
+
 export async function getCitationSignals(projectId: string, geoAuditId?: string) {
   return prisma.aiCitationOpportunity.findMany({
     where: { projectId, ...(geoAuditId ? { geoAuditId } : {}) },
