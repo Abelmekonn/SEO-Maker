@@ -83,6 +83,10 @@ model Project {
   compPhaseTotal Int       @default(0)
   compProviderOk Boolean   @default(false)
   compAiUsed     Boolean   @default(false)
+  /// What the last automatic discovery run found (DiscoveryResult in
+  /// @seo-maker/core/competitors): the competitor it chose, the evidence,
+  /// and whether an existing analysis was reused instead of re-crawled.
+  compResult     Json?
 
   /// analysisMode: quick | deep. Quick runs from a URL alone (Phase 0.6).
   analysisMode String @default("quick")
@@ -573,9 +577,17 @@ model CompetitorPage {
   @@index([competitorId])
 }
 
+/// A search the project is measured on: generated from the business profile
+/// (source ai), or the user's own target keywords (source manual).
+///
 /// source: seed | ai | page | manual
 /// intent: transactional | commercial | informational | navigational
-/// status: pending | fetched | unavailable | failed
+/// status: pending | fetched | unavailable | failed | retired
+///         retired: no longer in the project's search set (regenerated, or the
+///         market changed). Kept for its search results' history, never used
+///         as evidence.
+/// locationCode and languageCode are the market the results were fetched
+/// for, from the business profile; the defaults are never relied on.
 model CompetitorQuery {
   id           String    @id @default(cuid())
   projectId    String
@@ -593,6 +605,10 @@ model CompetitorQuery {
   /// Where the user's own site ranks for this query, when known.
   selfPosition Int?
   selfUrl      String?
+  /// high | medium | low, as generated. How much it matters to the business.
+  priority     String?
+  /// Why it was generated, shown with it.
+  reason       String?
   status       String    @default("pending")
   checkedAt    DateTime?
   createdAt    DateTime  @default(now())

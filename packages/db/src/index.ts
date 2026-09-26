@@ -63,5 +63,6 @@ export {
   resetCompetitorProgress,
   setCompetitorStatus,
   writeCompetitorPhase,
+  writeCompetitorResult,
   type CompetitorProgress,
 } from "./competitor-progress";

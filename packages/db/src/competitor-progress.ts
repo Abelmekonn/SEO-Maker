@@ -18,6 +18,8 @@ export type CompetitorProgress = {
   compPhaseTotal: number;
   compProviderOk: boolean;
   compAiUsed: boolean;
+  /** DiscoveryResult from @seo-maker/core/competitors, read with readDiscoveryResult. */
+  compResult: unknown;
 };
 
 export async function readCompetitorProgress(
@@ -26,7 +28,7 @@ export async function readCompetitorProgress(
 ): Promise<CompetitorProgress> {
   const rows = await prisma.$queryRawUnsafe<CompetitorProgress[]>(
     `SELECT "compStatus", "compPhase", "compError", "compRunAt", "compDone", "compTotal",
-            "compPhaseDone", "compPhaseTotal", "compProviderOk", "compAiUsed"
+            "compPhaseDone", "compPhaseTotal", "compProviderOk", "compAiUsed", "compResult"
      FROM "Project" WHERE "id" = $1`,
     projectId,
   );
@@ -42,7 +44,17 @@ export async function readCompetitorProgress(
     compPhaseTotal: row?.compPhaseTotal ?? 0,
     compProviderOk: row?.compProviderOk ?? false,
     compAiUsed: row?.compAiUsed ?? false,
+    compResult: row?.compResult ?? null,
   };
+}
+
+/** Stores what a discovery run found. */
+export async function writeCompetitorResult(prisma: PrismaClient, projectId: string, result: unknown) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "Project" SET "compResult" = $1::jsonb WHERE "id" = $2`,
+    result == null ? null : JSON.stringify(result),
+    projectId,
+  );
 }
 
 export async function setCompetitorStatus(
@@ -82,13 +94,15 @@ export async function setCompetitorStatus(
 export async function writeCompetitorPhase(
   prisma: PrismaClient,
   projectId: string,
-  data: { phase: string; phaseDone: number; phaseTotal: number },
+  data: { phase: string; phaseDone: number; phaseTotal: number; done?: number },
 ) {
   await prisma.$executeRawUnsafe(
-    `UPDATE "Project" SET "compPhase" = $1, "compPhaseDone" = $2, "compPhaseTotal" = $3 WHERE "id" = $4`,
+    `UPDATE "Project" SET "compPhase" = $1, "compPhaseDone" = $2, "compPhaseTotal" = $3,
+       "compDone" = COALESCE($4, "compDone") WHERE "id" = $5`,
     data.phase,
     data.phaseDone,
     data.phaseTotal,
+    data.done ?? null,
     projectId,
   );
 }
