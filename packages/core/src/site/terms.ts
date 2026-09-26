@@ -34,7 +34,8 @@ const STOPWORDS = new Set([
 function stem(word: string): string {
   if (word.length > 4 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
   if (word.length > 4 && word.endsWith("ses")) return word.slice(0, -2);
-  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss") && !word.endsWith("us")) {
+  // "saas" and "paas" are not plurals.
+  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss") && !word.endsWith("us") && !word.endsWith("aas")) {
     return word.slice(0, -1);
   }
   return word;

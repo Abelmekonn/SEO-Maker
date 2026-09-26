@@ -84,9 +84,15 @@ export type RunPerformanceJob = {
   pages: PerfPageTarget[];
 };
 
+/**
+ * Automatic discovery of one strongest competitor. `usageId` is the AI
+ * generation the run was charged to (its search queries); the worker
+ * settles it.
+ */
 export type CompetitorDiscoverJob = {
   projectId: string;
   mode: "full" | "refresh";
+  usageId?: string;
 };
 
 export type CompetitorAnalyzeOneJob = {
@@ -98,31 +104,39 @@ export type CompetitorInsightsJob = {
   projectId: string;
 };
 
-/** The nine phases the discovery orchestrator reports through. */
+/**
+ * The phases a discovery run reports through, in order. A run that reuses
+ * an existing competitor skips the crawl phases and says so; nothing is
+ * shown as done that did not run.
+ */
 export const COMPETITOR_PHASES = [
+  "profile",
   "queries",
   "serp",
   "candidates",
-  "classify",
+  "select",
+  "existing",
+  "pages",
   "crawl",
-  "score",
-  "gaps",
+  "analyze",
+  "confidence",
   "opportunities",
-  "summary",
 ] as const;
 
 export type CompetitorPhase = (typeof COMPETITOR_PHASES)[number];
 
 export const COMPETITOR_PHASE_LABELS: Record<CompetitorPhase, string> = {
+  profile: "Preparing business context",
   queries: "Generating search queries",
-  serp: "Searching the results pages",
-  candidates: "Collecting candidate domains",
-  classify: "Classifying domains",
-  crawl: "Crawling competitor sites",
-  score: "Scoring competitors",
-  gaps: "Finding content gaps",
-  opportunities: "Prioritizing opportunities",
-  summary: "Writing the summary",
+  serp: "Searching relevant queries",
+  candidates: "Finding competitor candidates",
+  select: "Selecting strongest competitor",
+  existing: "Checking existing competitor data",
+  pages: "Selecting important pages",
+  crawl: "Crawling competitor pages",
+  analyze: "Analyzing competitor",
+  confidence: "Calculating confidence",
+  opportunities: "Generating opportunities",
 };
 
 /**
@@ -180,8 +194,11 @@ export function aiStopKey(projectId: string): string {
   return `seo-maker:ai-stop:${projectId}`;
 }
 
-/** opportunities: AI wording for the site opportunities. strategy: Site Strategy. */
-export type AiSiteTask = "opportunities" | "strategy";
+/**
+ * opportunities: AI wording for the site opportunities. strategy: Site Strategy.
+ * search-queries: the search keywords generated from the business profile.
+ */
+export type AiSiteTask = "opportunities" | "strategy" | "search-queries";
 
 export type AiSiteAnalyzeJob = {
   projectId: string;

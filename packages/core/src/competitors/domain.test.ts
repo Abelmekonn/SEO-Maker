@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { hostKey, isNonCompetitorDomain, isSelfDomain, parseDomainInput } from "./domain";
+import {
+  discoveryExclusion,
+  hostKey,
+  isNonCompetitorDomain,
+  isSelfDomain,
+  normalizeCompetitorDomain,
+  parseDomainInput,
+  registrableDomain,
+} from "./domain";
 
 describe("hostKey", () => {
   it("normalizes case, trailing dots and www", () => {
@@ -86,5 +94,60 @@ describe("isNonCompetitorDomain", () => {
   it("keeps ordinary commercial domains", () => {
     expect(isNonCompetitorDomain("competitorsite.com")).toBe(false);
     expect(isNonCompetitorDomain("agency.co.uk")).toBe(false);
+  });
+});
+
+describe("normalizeCompetitorDomain", () => {
+  it("resolves every spelling of one site to the same competitor", () => {
+    const spellings = ["www.example.com", "example.com", "https://example.com/", "https://www.example.com/pricing?x=1", "HTTP://Example.COM."];
+    expect(new Set(spellings.map(normalizeCompetitorDomain))).toEqual(new Set(["example.com"]));
+  });
+
+  it("returns null for something that is not a domain", () => {
+    expect(normalizeCompetitorDomain("")).toBeNull();
+    expect(normalizeCompetitorDomain("localhost")).toBeNull();
+  });
+});
+
+describe("registrableDomain", () => {
+  it("groups a company's subdomains under its domain", () => {
+    expect(registrableDomain("docs.adyen.com")).toBe("adyen.com");
+    expect(registrableDomain("www.adyen.com")).toBe("adyen.com");
+    expect(registrableDomain("adyen.com")).toBe("adyen.com");
+  });
+
+  it("keeps country second levels as part of the suffix", () => {
+    expect(registrableDomain("shop.example.co.uk")).toBe("example.co.uk");
+    expect(registrableDomain("www.bank.com.et")).toBe("bank.com.et");
+  });
+
+  it("keeps separate owners on a hosting platform apart", () => {
+    expect(registrableDomain("alice.github.io")).toBe("alice.github.io");
+    expect(registrableDomain("store.myshopify.com")).toBe("store.myshopify.com");
+  });
+});
+
+describe("isSelfDomain with subdomains", () => {
+  it("treats the site's own subdomains as its own", () => {
+    expect(isSelfDomain("docs.stripe.com", "https://stripe.com/")).toBe(true);
+  });
+});
+
+describe("discoveryExclusion", () => {
+  it("names why a domain is not a business competitor", () => {
+    expect(discoveryExclusion("www.google.co.uk")).toBe("Search engine");
+    expect(discoveryExclusion("en.wikipedia.org")).toBe("Reference site");
+    expect(discoveryExclusion("g2.com")).toBe("Review or comparison site");
+    expect(discoveryExclusion("forbes.com")).toBe("General publisher");
+    expect(discoveryExclusion("yelp.com")).toBe("Directory or listing site");
+  });
+
+  it("lets ordinary businesses through", () => {
+    expect(discoveryExclusion("adyen.com")).toBeNull();
+  });
+
+  it("does not block a publisher a user adds by hand", () => {
+    expect(isNonCompetitorDomain("forbes.com")).toBe(false);
+    expect(isNonCompetitorDomain("youtube.com")).toBe(true);
   });
 });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   type ConfidenceInput,
+  calculateCompetitorConfidence,
+  readStoredConfidence,
+  toStoredConfidence,
   businessSimilarity,
   competitorConfidence,
   locationSimilarity,
@@ -231,5 +234,131 @@ describe("competitorConfidence", () => {
     expect(competitorConfidence(input()).band).toMatch(
       /^(primary|secondary|peripheral|unrelated)$/,
     );
+  });
+});
+
+describe("calculateCompetitorConfidence", () => {
+  const search = {
+    queriesChecked: 8,
+    appearanceCount: 6,
+    sharedQueryCount: 3,
+    selfAppearanceCount: 4,
+    positions: [1, 2, 3, 5, 8, 12],
+    top3: 3,
+    top10: 5,
+    top20: 6,
+    bestPosition: 1,
+    avgPosition: 5.2,
+    meanRelevance: 0.85,
+  };
+  const business = { score: 0.8, reason: null, evidence: { sharedTerms: ["payment"] }, fromContent: true };
+  const market = { score: 1, reason: null, evidence: { basis: "language" } };
+
+  it("measures all six signals when every source is available", () => {
+    const result = calculateCompetitorConfidence({ search, business, market, source: "serp", classificationConfidence: 0.9 });
+    expect(result.measuredSignalCount).toBe(6);
+    expect(result.totalSignalCount).toBe(6);
+    expect(result.notMeasured).toEqual([]);
+    expect(result.basis).toBe("search");
+    expect(result.confidence).toBeGreaterThanOrEqual(75);
+    expect(result.confidenceBand).toBe("primary");
+    const total = result.signals.reduce((sum, signal) => sum + signal.appliedWeight, 0);
+    expect(total).toBeCloseTo(100, 0);
+    expect(result.signals.find((signal) => signal.id === "rankingVisibility")?.evidence).toMatchObject({ top3: 3, top10: 5, top20: 6 });
+  });
+
+  it("redistributes weight over the measured signals and explains the rest", () => {
+    const result = calculateCompetitorConfidence({
+      search,
+      business,
+      market: { score: null, evidence: null, reason: "Your target market is not set and your site's language is unknown." },
+      source: "manual",
+      classificationConfidence: null,
+    });
+    expect(result.measuredSignalCount).toBe(5);
+    expect(result.notMeasured).toEqual([{ id: "locationSimilarity", reason: "Your target market is not set and your site's language is unknown." }]);
+    const measured = result.signals.filter((signal) => signal.measured);
+    expect(measured.reduce((sum, signal) => sum + signal.appliedWeight, 0)).toBeCloseTo(100, 0);
+  });
+
+  it("gives every search signal the provider reason when no search provider is configured", () => {
+    const reason = "No search provider is configured, so search results cannot be checked.";
+    const result = calculateCompetitorConfidence({ search: null, searchUnavailableReason: reason, business, market, source: "manual", classificationConfidence: null });
+    for (const id of ["queryCoverage", "rankingVisibility", "queryRelevance"]) {
+      expect(result.signals.find((signal) => signal.id === id)).toMatchObject({ measured: false, reason });
+    }
+    // A manual competitor with measured business and market evidence still
+    // gets a score, capped: without search evidence it is never "primary".
+    expect(result.measuredSignalCount).toBe(3);
+    expect(result.basis).toBe("business");
+    expect(result.confidence).toBe(60);
+    expect(result.cappedAt).toBe(60);
+    expect(result.confidenceBand).toBe("secondary");
+  });
+
+  it("does not score without business context or search evidence", () => {
+    const result = calculateCompetitorConfidence({
+      search: null,
+      business: { score: null, evidence: null, reason: "Not enough is known about your business.", fromContent: false },
+      market,
+      source: "manual",
+      classificationConfidence: null,
+    });
+    expect(result.confidence).toBeNull();
+    expect(result.basis).toBeNull();
+    expect(result.reason).toMatch(/no evidence yet/);
+    expect(result.signals.find((signal) => signal.id === "businessSimilarity")?.reason).toBe("Not enough is known about your business.");
+  });
+
+  it("measures nothing when nothing is known, with a reason on every signal", () => {
+    const result = calculateCompetitorConfidence({
+      search: null,
+      business: { score: null, evidence: null, reason: "b", fromContent: false },
+      market: { score: null, evidence: null, reason: "m" },
+      source: "serp",
+      classificationConfidence: null,
+    });
+    expect(result.measuredSignalCount).toBe(0);
+    expect(result.confidence).toBeNull();
+    expect(result.signals.every((signal) => typeof signal.reason === "string" && signal.reason.length > 0)).toBe(true);
+  });
+
+  it("treats a manual competitor as classified and an automatic one by its pages", () => {
+    const manual = calculateCompetitorConfidence({ search, business, market, source: "manual", classificationConfidence: null });
+    expect(manual.signals.find((signal) => signal.id === "classificationConfidence")).toMatchObject({ measured: true, score: 1 });
+    const automatic = calculateCompetitorConfidence({ search, business, market, source: "serp", classificationConfidence: 0.4 });
+    expect(automatic.signals.find((signal) => signal.id === "classificationConfidence")).toMatchObject({ measured: true, score: 0.4 });
+  });
+
+  it("explains a checked search the competitor never appeared in", () => {
+    const absent = { ...search, appearanceCount: 0, sharedQueryCount: 0, positions: [], top3: 0, top10: 0, top20: 0, bestPosition: null, avgPosition: null, meanRelevance: null };
+    const result = calculateCompetitorConfidence({ search: absent, business, market, source: "manual", classificationConfidence: null });
+    expect(result.signals.find((signal) => signal.id === "queryCoverage")).toMatchObject({ measured: true, score: 0 });
+    expect(result.signals.find((signal) => signal.id === "rankingVisibility")?.reason).toMatch(/Not found in the 8 searches checked/);
+  });
+});
+
+describe("stored confidence", () => {
+  it("round-trips the version 2 form", () => {
+    const result = calculateCompetitorConfidence({
+      search: null,
+      business: { score: 0.7, evidence: null, reason: null, fromContent: true },
+      market: { score: 1, evidence: null, reason: null },
+      source: "manual",
+      classificationConfidence: null,
+    });
+    const stored = readStoredConfidence(JSON.parse(JSON.stringify(toStoredConfidence(result))));
+    expect(stored?.measuredSignalCount).toBe(3);
+    expect(stored?.signals.find((signal) => signal.id === "queryCoverage")?.reason).toBeTruthy();
+  });
+
+  it("reads the original parts form, marking unmeasured signals for re-analysis", () => {
+    const stored = readStoredConfidence({
+      queryCoverage: { raw: 0, weight: 0, points: 0 },
+      classificationConfidence: { raw: 1, weight: 100, points: 100 },
+    });
+    expect(stored?.measuredSignalCount).toBe(1);
+    expect(stored?.signals.find((signal) => signal.id === "queryCoverage")?.reason).toMatch(/Analyze the competitor again/);
+    expect(readStoredConfidence(null)).toBeNull();
   });
 });
