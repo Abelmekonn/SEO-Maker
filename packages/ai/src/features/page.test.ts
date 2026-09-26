@@ -27,8 +27,8 @@ function page(overrides: Partial<PageContext> = {}): PageContext {
     missingAlt: 2,
     imagesWithContext: [],
     imagesMissingAlt: [
-      { src: "https://x.com/a.png", filename: "checkout-flow", context: "" },
-      { src: "https://x.com/b.png", filename: null, context: "" },
+      { src: "https://x.com/a.png", filename: "checkout-flow", context: "", fetchable: true },
+      { src: "https://x.com/b.png", filename: null, context: "", fetchable: true },
     ],
     internalLinkCount: 1,
     outgoingLinks: [{ href: "https://x.com/billing", anchor: "Billing" }],
@@ -48,10 +48,10 @@ const site: SiteContext = {
   pageCount: 4,
   knownUrls: ["https://x.com/payments", "https://x.com/billing", "https://x.com/pricing", "https://x.com/docs"],
   knownPages: [
-    { url: "https://x.com/payments", title: "Payments", pageType: "product" },
-    { url: "https://x.com/billing", title: "Billing", pageType: "product" },
-    { url: "https://x.com/pricing", title: "Pricing", pageType: "pricing" },
-    { url: "https://x.com/docs", title: "Docs", pageType: "documentation" },
+    { url: "https://x.com/payments", title: "Payments", pageType: "product", fetched: true },
+    { url: "https://x.com/billing", title: "Billing", pageType: "product", fetched: true },
+    { url: "https://x.com/pricing", title: "Pricing", pageType: "pricing", fetched: true },
+    { url: "https://x.com/docs", title: "Docs", pageType: "documentation", fetched: true },
   ],
 };
 
@@ -128,6 +128,25 @@ describe("image-alt grounding", () => {
       expect(data.images.map((row) => row.src)).toEqual(["https://x.com/a.png"]);
       expect(data.needsHumanReview).toBe(true);
     }
+  });
+
+  it("accepts alt text written from the image only when the image was sent", () => {
+    const answer = {
+      ...base,
+      images: [{ src: "https://x.com/b.png", alt: "Dashboard showing monthly payouts", basis: "image" as const }],
+      skipped: [],
+    };
+    const seen = spec.refine!(answer, { imagesSent: true });
+    expect(seen.ok && (seen.data as { images: unknown[] }).images).toHaveLength(1);
+    // A text-only provider claiming it looked at the image is inventing it.
+    const unseen = spec.refine!(answer, { imagesSent: false });
+    expect(unseen.ok && (unseen.data as { images: unknown[] }).images).toHaveLength(0);
+  });
+
+  it("tells a text-only model it cannot see the images, and a multimodal one that it can", () => {
+    expect(spec.buildPrompt("", { imagesAttached: false }).user).toMatch(/CANNOT see these images/);
+    expect(spec.buildPrompt("", { imagesAttached: true }).user).toMatch(/attached after this message/);
+    expect(spec.imageRefs).toEqual(["https://x.com/a.png", "https://x.com/b.png"]);
   });
 });
 

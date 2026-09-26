@@ -9,7 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { prisma } from "@seo-maker/db";
-import { PROMPT_VERSION, type AiFeature, type AiMode } from "../config";
+import { promptVersionFor, type AiFeature, type AiMode } from "../config";
 
 export type CacheKeyInput = {
   feature: AiFeature;
@@ -43,7 +43,7 @@ export function buildInputHash(input: CacheKeyInput): string {
     feature: input.feature,
     mode: input.mode,
     model: input.model,
-    promptVersion: input.promptVersion ?? PROMPT_VERSION,
+    promptVersion: input.promptVersion ?? promptVersionFor(input.feature),
     knowledgeVersion: input.knowledgeVersion ?? null,
     evidence: input.evidence,
     businessContext: input.businessContext ?? null,
@@ -55,6 +55,7 @@ export type CachedResult = {
   id: string;
   projectId: string;
   pageId: string | null;
+  competitorId: string | null;
   output: unknown;
   model: string;
   provider: string;
@@ -75,6 +76,7 @@ export async function findCachedResult(
       id: true,
       projectId: true,
       pageId: true,
+      competitorId: true,
       output: true,
       model: true,
       provider: true,

@@ -1,3 +1,4 @@
+import { syncCompetitorGaps } from "@seo-maker/ai";
 import type { CompetitorAnalyzeOneJob } from "@seo-maker/core/queue";
 import {
   type AuditablePage,
@@ -66,6 +67,9 @@ function auditToRow(audit: CompetitorPageAudit) {
     schemaCount: audit.schemaCount,
     indexable: audit.indexable,
     xRobotsTag: audit.xRobotsTag,
+    headings: audit.headings,
+    schema: audit.schemaTypes,
+    pageType: audit.pageType,
     status: "analyzed",
   };
 }
@@ -223,6 +227,13 @@ export async function competitorAnalyzeOneJob(data: CompetitorAnalyzeOneJob) {
         lastCrawledAt: new Date(),
         lastAnalyzedAt: new Date(),
       },
+    });
+
+    // The comparison with your site and the gaps shared across competitors
+    // are deterministic (Phase 4.1, 4.2), so every analysis refreshes them. A
+    // failure here must not fail the competitor, whose own results are saved.
+    await syncCompetitorGaps(competitor.projectId).catch((error) => {
+      console.warn(`Competitor ${competitor.id}: could not refresh the comparison and gaps:`, error);
     });
 
     // Keep the self-score handy for comparison without recomputing it in the UI.

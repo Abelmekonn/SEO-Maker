@@ -1,11 +1,19 @@
+import { buildCompetitorComparison, loadSiteIntelligence, saveComparison } from "@seo-maker/ai";
+import { competitorInsightSchema } from "@seo-maker/ai/schemas";
+import type { CompetitorComparison } from "@seo-maker/core/competitors";
 import { type SeoDimensionId, weightedSeoScore } from "@seo-maker/core/scoring";
 import { prisma } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
 import { CompetitorDetail } from "@/components/project/CompetitorDetail";
+import { CompetitorGaps } from "@/components/project/CompetitorGaps";
+import { CompetitorInsightButton } from "@/components/project/CompetitorInsightButton";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { premiumGate } from "@/components/project/PremiumRoute";
+import { aiConfigured } from "@/lib/ai-results";
 import { getCompetitorForUser, serpConfigured } from "@/lib/competitors";
+import { getAccountForUser } from "@/lib/plan";
 import { latestPagesForProject, requireUserId } from "@/lib/projects";
+import { getAiCompetitorJobs } from "@/lib/queue";
 
 const TABS = ["overview", "rankings", "pages", "content", "gaps", "compare"] as const;
 type TabId = (typeof TABS)[number];
@@ -17,6 +25,11 @@ function readTab(value: string | undefined): TabId {
 function readParts(value: unknown) {
   if (!value || typeof value !== "object") return null;
   return value as Record<string, { raw: number; weight: number; points: number }>;
+}
+
+function readComparison(value: unknown): CompetitorComparison | null {
+  const raw = value as Partial<CompetitorComparison> | null;
+  return raw && Array.isArray(raw.facts) && Array.isArray(raw.limits) ? (raw as CompetitorComparison) : null;
 }
 
 function readNotMeasured(value: unknown): SeoDimensionId[] {
@@ -66,9 +79,42 @@ export default async function CompetitorDetailPage({
   const analysis = competitor.analyses[0] ?? null;
   const self = weightedSeoScore({ pages: selfPages });
 
+  // The comparison is stored with each analysis (Phase 4.1). One made before
+  // comparisons existed is built now, once, and stored.
+  let comparison = readComparison(analysis?.comparison);
+  if (!comparison && analysis && competitor.status === "ready") {
+    const loaded = await loadSiteIntelligence(id);
+    if (loaded) {
+      comparison = await buildCompetitorComparison(competitor, loaded);
+      await saveComparison(competitor.id, comparison);
+    }
+  }
+  const [insightRow, insightJobs, account] = await Promise.all([
+    prisma.aiResult.findFirst({
+      where: { competitorId: competitor.id, feature: "competitor-insight" },
+      orderBy: { createdAt: "desc" },
+      select: { status: true, output: true, model: true, provider: true, createdAt: true },
+    }),
+    getAiCompetitorJobs(id).catch(() => []),
+    getAccountForUser(userId),
+  ]);
+  const parsedInsight = insightRow?.status === "ok" ? competitorInsightSchema.safeParse(insightRow.output) : null;
+  const insight = parsedInsight?.success ? parsedInsight.data : null;
+  const explaining = insightJobs.some((job) => !job.data.competitorId || job.data.competitorId === competitor.id);
+  const insightDisabled = !account.limits.competitorAi
+    ? `${account.limits.label} does not include Competitor AI.`
+    : !aiConfigured()
+      ? "AI is not available right now. Try again later."
+      : explaining
+        ? "Interpreting now. This page updates when it is ready."
+        : !comparison || comparison.facts.length === 0
+          ? "There are no observed differences to interpret yet."
+          : undefined;
+
   return (
     <>
       <CrawlRefresh status={competitor.status} intervalMs={3000} />
+      <CrawlRefresh status={explaining ? "running" : "idle"} intervalMs={4000} />
       <CompetitorDetail
         projectId={id}
         competitorId={competitor.id}
@@ -114,6 +160,23 @@ export default async function CompetitorDetailPage({
           selfPosition: row.query.selfPosition,
         }))}
         summary={analysis?.summary ?? null}
+        gapsPanel={
+          <CompetitorGaps
+            domain={competitor.domain}
+            comparison={comparison}
+            insight={insight}
+            insightMeta={insightRow && insight ? `${insightRow.provider} / ${insightRow.model} · ${insightRow.createdAt.toLocaleString("en-GB")}` : null}
+            action={
+              <CompetitorInsightButton
+                projectId={id}
+                competitorId={competitor.id}
+                label={insight ? "Re-interpret with AI" : "Interpret with AI"}
+                disabledReason={insightDisabled}
+                force={Boolean(insight)}
+              />
+            }
+          />
+        }
         providerConfigured={serpConfigured()}
         lastAnalyzedAt={
           competitor.lastAnalyzedAt ? competitor.lastAnalyzedAt.toLocaleString() : null

@@ -2,6 +2,7 @@ import { prisma, readPerfProgress } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { PerformanceDashboard } from "@/components/project/PerformanceDashboard";
+import { premiumGate } from "@/components/project/PremiumRoute";
 import { isCrawled } from "@/lib/page-audit";
 import { auditHistory, keyOfPage, latestAudits, pageKeyIndex } from "@/lib/page-results";
 import { defaultPerfPageIds, readPerfPageIds } from "@/lib/perf-scope";
@@ -25,6 +26,10 @@ export default async function ProjectPerformancePage({
   const project = await getProjectForUser(id, userId);
   if (!project) {
     notFound();
+  }
+  const gate = await premiumGate(project.id, "performance");
+  if (gate) {
+    return gate;
   }
 
   const account = await getAccountForUser(userId);

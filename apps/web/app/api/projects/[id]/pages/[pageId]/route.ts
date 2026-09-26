@@ -17,6 +17,7 @@ const PAGE_TYPES: readonly PageType[] = [
   "contact",
   "legal",
   "landing",
+  "utility",
   "other",
 ];
 

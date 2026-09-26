@@ -50,7 +50,7 @@ export async function getCompetitorInsights(projectId: string) {
       take: 50,
     }),
     prisma.opportunity.findMany({
-      where: { projectId, status: { not: "dismissed" } },
+      where: { projectId, source: "competitor", status: { not: "dismissed" } },
       orderBy: { score: "desc" },
       take: 50,
     }),

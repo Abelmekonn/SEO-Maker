@@ -247,7 +247,7 @@ export function CrawlProgressView({
               <p className="text-xs leading-5 text-muted-foreground">Your previous results are unchanged.</p>
             ) : null}
           </div>
-          <RecrawlButton projectId={projectId} maxPages={progress.maxPages} appearance="primary" />
+          <RecrawlButton projectId={projectId} appearance="primary" />
         </section>
       ) : null}
 
@@ -257,7 +257,7 @@ export function CrawlProgressView({
             <p className="text-sm font-medium text-ink">You stopped this crawl before any page was saved.</p>
             <p className="text-sm leading-6 text-body">There are no results for this site yet. Crawl it when you are ready.</p>
           </div>
-          <RecrawlButton projectId={projectId} maxPages={progress.maxPages} appearance="primary" />
+          <RecrawlButton projectId={projectId} appearance="primary" />
         </section>
       ) : null}
 
@@ -339,6 +339,15 @@ export function CrawlProgressView({
               <dl className="flex flex-col">
                 <PlanRow label="robots.txt" value={progress.plan.robotsFound ? "Found" : "Not found"} good={progress.plan.robotsFound} />
                 <PlanRow label="Sitemap URLs" value={progress.plan.sitemapUrls.toLocaleString()} />
+                {progress.plan.priority != null ? (
+                  <PlanRow label="Priority crawl" value={`${progress.plan.priority} of up to ${progress.plan.priorityLimit}`} />
+                ) : null}
+                {progress.plan.standard != null ? (
+                  <PlanRow label="Standard crawl" value={progress.plan.standard.toLocaleString()} />
+                ) : null}
+                {progress.plan.blocked ? (
+                  <PlanRow label="Blocked by robots.txt" value={progress.plan.blocked.toLocaleString()} />
+                ) : null}
                 <PlanRow label="Sections sampled" value={`${progress.plan.sections}`} />
                 <PlanRow
                   label="Speed"
@@ -355,7 +364,7 @@ export function CrawlProgressView({
             ) : (
               <p className="flex items-center gap-2 text-sm text-body">
                 <Loader2 className="size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden />
-                Planned once robots.txt and the sitemap are read.
+                Planned once robots.txt, the sitemap and the homepage are read.
               </p>
             )}
           </section>
@@ -414,7 +423,7 @@ function subtitle(progress: CrawlProgress, phase: CrawlPhase, failed: boolean, s
         : "The crawl is queued and starts as soon as the worker is free.";
     case "starting":
     case "discovering":
-      return "Reading robots.txt and the sitemap to choose which pages to crawl, spread across the sections of the site.";
+      return "Reading robots.txt, the sitemap and the homepage's links to rank the site's pages: the most important get a Priority crawl, the rest a Standard crawl.";
     case "crawling":
       return `Fetching and checking each page: status, title, headings, canonical, structured data, images, links and indexability. ${progress.hasPrevious ? "Your previous results stay in place until this finishes." : ""}`;
     case "scoring":

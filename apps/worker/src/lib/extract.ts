@@ -11,7 +11,7 @@ import {
   countWords,
   normalizeContent,
 } from "@seo-maker/core/page";
-import { hostKey, toAbsoluteUrl } from "@seo-maker/core/crawl";
+import { type CrawlTier, hostKey, toAbsoluteUrl } from "@seo-maker/core/crawl";
 import type { CheerioCrawlingContext } from "crawlee";
 
 /**
@@ -20,7 +20,19 @@ import type { CheerioCrawlingContext } from "crawlee";
  * The old crawler kept counts only — `h2Count`, `imageCount`, `missingAlt`,
  * `schemaCount` — and threw the page away. Nothing downstream could then
  * recommend anything specific, because the evidence no longer existed.
+ *
+ * `tier` decides how much evidence is kept. A Priority Crawl keeps all of it.
+ * A Standard Crawl computes exactly the same counts, so every deterministic
+ * check gives the same answer, and keeps what the site inventory needs (H2s,
+ * internal links with their anchors, schema types) but not image details,
+ * social tags or full JSON-LD. The page text is dropped by the caller after
+ * its word count and fingerprint are taken.
  */
+
+/** H2s a Standard Crawl keeps: enough for Site Intelligence's topic terms. */
+const STANDARD_HEADINGS = 20;
+/** Link targets reported for URL discovery per page. */
+const MAX_DISCOVERED_LINKS = 2000;
 
 /** Cheerio's API as crawlee hands it to us, without depending on cheerio directly. */
 type CheerioApi = CheerioCrawlingContext["$"];
@@ -46,9 +58,15 @@ export type ExtractedPage = {
   schemaCount: number;
   schemaTypes: string[];
   evidence: PageEvidence;
+  /**
+   * Every link target on the page, absolute, for URL discovery: internal and
+   * external, pages and files alike. The inventory decides what each one is.
+   */
+  discovered: string[];
 };
 
-export function extractPage($: CheerioApi, loadedUrl: string): ExtractedPage {
+export function extractPage($: CheerioApi, loadedUrl: string, tier: CrawlTier = "priority"): ExtractedPage {
+  const standard = tier === "standard";
   const loaded = new URL(loadedUrl);
   const originHost = hostKey(loaded.hostname);
 
@@ -73,24 +91,24 @@ export function extractPage($: CheerioApi, loadedUrl: string): ExtractedPage {
   const h3Count = $("h3").length;
 
   const headings: PageEvidence["headings"] = [];
-  for (const node of $("h2").toArray().slice(0, MAX_STORED_HEADINGS)) {
+  for (const node of $("h2").toArray().slice(0, standard ? STANDARD_HEADINGS : MAX_STORED_HEADINGS)) {
     const text = clean($(node).text());
     if (text) {
       headings.push({ level: 2, text: text.slice(0, 300) });
     }
   }
-  for (const node of $("h3").toArray().slice(0, MAX_STORED_HEADINGS)) {
+  for (const node of standard ? [] : $("h3").toArray().slice(0, MAX_STORED_HEADINGS)) {
     const text = clean($(node).text());
     if (text) {
       headings.push({ level: 3, text: text.slice(0, 300) });
     }
   }
 
-  const links = extractLinks($, loadedUrl, originHost);
-  const images = extractImages($, loadedUrl);
-  const schema = extractSchema($);
-  const openGraph = extractMetaPrefix($, "og:");
-  const twitter = extractMetaPrefix($, "twitter:");
+  const links = extractLinks($, loadedUrl, originHost, standard);
+  const images = extractImages($, loadedUrl, standard);
+  const schema = extractSchema($, standard);
+  const openGraph = standard ? {} : extractMetaPrefix($, "og:");
+  const twitter = standard ? {} : extractMetaPrefix($, "twitter:");
 
   // Read text last: this mutates the document by removing script/style, and
   // every field above must be taken from the intact page. Heading text in
@@ -129,11 +147,29 @@ export function extractPage($: CheerioApi, loadedUrl: string): ExtractedPage {
       twitter,
       redirectChain: [],
     },
+    discovered: links.discovered,
   };
 }
 
-function extractLinks($: CheerioApi, base: string, originHost: string) {
+/** `href` resolved against the page, or null when it is not a URL at all (mailto:, #top). */
+function resolveHref(href: string, base: string): string | null {
+  const trimmed = href.trim();
+  if (!trimmed || trimmed.startsWith("#") || /^(?:mailto|tel|javascript|data|sms):/i.test(trimmed)) {
+    return null;
+  }
+  try {
+    const resolved = new URL(trimmed, base);
+    resolved.hash = "";
+    return resolved.toString();
+  } catch {
+    // Kept as written: the inventory counts it as an invalid URL.
+    return trimmed.slice(0, 300);
+  }
+}
+
+function extractLinks($: CheerioApi, base: string, originHost: string, standard: boolean) {
   const stored: LinkEvidence[] = [];
+  const discovered = new Set<string>();
   let internal = 0;
   let external = 0;
 
@@ -142,6 +178,10 @@ function extractLinks($: CheerioApi, base: string, originHost: string) {
     const href = element.attr("href");
     if (!href) {
       continue;
+    }
+    const resolved = resolveHref(href, base);
+    if (resolved && discovered.size < MAX_DISCOVERED_LINKS) {
+      discovered.add(resolved);
     }
     const target = toAbsoluteUrl(href, base);
     if (!target) {
@@ -161,7 +201,9 @@ function extractLinks($: CheerioApi, base: string, originHost: string) {
       external += 1;
     }
 
-    if (stored.length < MAX_STORED_LINKS) {
+    // Internal links are the site's structure, which a Standard Crawl exists
+    // to map. Where a page sends visitors off-site is Priority evidence.
+    if (stored.length < MAX_STORED_LINKS && (isInternal || !standard)) {
       const anchor = clean(element.text()) || clean(element.find("img").attr("alt"));
       stored.push({
         href: target,
@@ -173,7 +215,7 @@ function extractLinks($: CheerioApi, base: string, originHost: string) {
     }
   }
 
-  return { internal, external, stored };
+  return { internal, external, stored, discovered: [...discovered] };
 }
 
 /**
@@ -184,7 +226,7 @@ function extractLinks($: CheerioApi, base: string, originHost: string) {
  * a later alt suggestion grounded — and when it is empty the honest output is
  * "a human needs to look at this image".
  */
-function extractImages($: CheerioApi, base: string) {
+function extractImages($: CheerioApi, base: string, countOnly: boolean) {
   const stored: ImageEvidence[] = [];
   const nodes = $("img").toArray();
   let missingAlt = 0;
@@ -202,7 +244,9 @@ function extractImages($: CheerioApi, base: string) {
       missingAlt += 1;
     }
 
-    if (stored.length >= MAX_STORED_IMAGES) {
+    // Image context walks the DOM around each image; a Standard Crawl only
+    // needs the counts the alt-text check reads.
+    if (countOnly || stored.length >= MAX_STORED_IMAGES) {
       continue;
     }
 
@@ -264,9 +308,14 @@ function filenameOf(src: string): string | null {
   return words.join(" ").slice(0, 120);
 }
 
-function extractSchema($: CheerioApi): SchemaEvidence[] {
+/**
+ * JSON-LD blocks. A Standard Crawl keeps each block's types and validity,
+ * which the schema check and the site's schema inventory read, but not the
+ * payload, which only schema recommendations for a Priority page need.
+ */
+function extractSchema($: CheerioApi, typesOnly: boolean): SchemaEvidence[] {
   const blocks: SchemaEvidence[] = [];
-  let budget = MAX_STORED_SCHEMA_BYTES;
+  let budget = typesOnly ? 0 : MAX_STORED_SCHEMA_BYTES;
 
   for (const node of $('script[type="application/ld+json"]').toArray()) {
     const raw = $(node).text().trim();
@@ -284,7 +333,7 @@ function extractSchema($: CheerioApi): SchemaEvidence[] {
         // Keep the shape even when the payload is too large to store whole.
         data: fits ? data : null,
         valid: true,
-        error: fits ? null : "Stored types only: JSON-LD exceeded the size budget.",
+        error: fits || typesOnly ? null : "Stored types only: JSON-LD exceeded the size budget.",
       });
     } catch (error) {
       blocks.push({
@@ -299,7 +348,8 @@ function extractSchema($: CheerioApi): SchemaEvidence[] {
   return blocks;
 }
 
-function schemaTypesOf(value: unknown, depth = 0): string[] {
+/** schema.org @type values in parsed JSON-LD, including @graph members. */
+export function schemaTypesOf(value: unknown, depth = 0): string[] {
   if (depth > 6 || value == null) {
     return [];
   }

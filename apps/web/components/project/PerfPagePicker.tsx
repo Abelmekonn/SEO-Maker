@@ -36,6 +36,7 @@ const TYPE_LABELS: Record<string, string> = {
   about: "About",
   contact: "Contact",
   legal: "Legal",
+  utility: "Utility",
   other: "Other",
 };
 
@@ -46,7 +47,7 @@ const scoreTone: Record<Rating, string> = {
   none: "bg-surface-card text-muted-foreground",
 };
 
-function typeLabel(type: string | null) {
+export function typeLabel(type: string | null) {
   return type ? (TYPE_LABELS[type] ?? type) : "Unknown";
 }
 
@@ -520,7 +521,7 @@ function FilterSelect({
   );
 }
 
-function QuickPick({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+export function QuickPick({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
 import { requireUserId } from "@/lib/projects";
+import { refundUsage } from "@/lib/crawl-access";
 import { stopAiWork } from "@/lib/queue";
 
 /**
@@ -23,9 +24,12 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   }
 
   try {
-    const { removed, running } = await stopAiWork(project.id);
+    const { removed, running, usageIds } = await stopAiWork(project.id);
+    // Generations taken off the queue never ran: they are not charged. The
+    // one running is settled by the worker when it stops.
+    await refundUsage(usageIds, "stopped before it started", "cancelled");
     return NextResponse.json({ ok: true, removed, running, state: running > 0 ? "stopping" : "stopped" });
   } catch {
-    return NextResponse.json({ error: "Queue is not running. Start Redis and the worker." }, { status: 503 });
+    return NextResponse.json({ error: "The AI queue is offline. Please try again shortly." }, { status: 503 });
   }
 }

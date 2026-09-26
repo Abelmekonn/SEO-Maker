@@ -1,6 +1,7 @@
 import { prisma } from "@seo-maker/db";
 import { NextResponse } from "next/server";
 import { getCompetitorForUser } from "@/lib/competitors";
+import { getAccountForUser } from "@/lib/plan";
 import { requireUserId } from "@/lib/projects";
 
 export async function PATCH(
@@ -10,6 +11,11 @@ export async function PATCH(
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "Sign in to update a competitor." }, { status: 401 });
+  }
+
+  const account = await getAccountForUser(userId);
+  if (account.limits.maxCompetitors === 0) {
+    return NextResponse.json({ error: "Upgrade your plan to track competitors." }, { status: 403 });
   }
 
   const { id, competitorId } = await params;

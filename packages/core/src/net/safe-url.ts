@@ -194,6 +194,87 @@ export async function safeFetch(
   throw new SafeUrlError("redirect-limit", `More than ${maxRedirects} redirects.`);
 }
 
+export type SafeFetchBytesResult = {
+  status: number;
+  finalUrl: string;
+  contentType: string | null;
+  bytes: Uint8Array;
+};
+
+/**
+ * `safeFetch` for binary content (images): every redirect hop re-validated,
+ * the body capped, and returned as bytes rather than decoded text.
+ */
+export async function safeFetchBytes(
+  input: string,
+  options: { timeoutMs?: number; maxBytes?: number; maxRedirects?: number; headers?: Record<string, string> } = {},
+): Promise<SafeFetchBytesResult> {
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const maxBytes = options.maxBytes ?? 2 * 1024 * 1024;
+  const maxRedirects = options.maxRedirects ?? 3;
+
+  let current = input;
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    const check = await assertSafeUrl(current);
+    if (!check.ok) {
+      throw new SafeUrlError(check.reason, check.detail);
+    }
+    const response = await fetch(check.url, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { "user-agent": "SEO-Maker-Bot/0.1", ...options.headers },
+    });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => {});
+      const location = response.headers.get("location");
+      if (!location) {
+        throw new SafeUrlError("invalid", "Redirect without a location header.");
+      }
+      current = new URL(location, check.url).toString();
+      continue;
+    }
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      await response.body?.cancel().catch(() => {});
+      throw new SafeUrlError("size", `Response exceeded ${maxBytes} bytes.`);
+    }
+    return {
+      status: response.status,
+      finalUrl: check.url.toString(),
+      contentType: response.headers.get("content-type"),
+      bytes: await readBytesCapped(response, maxBytes),
+    };
+  }
+  throw new SafeUrlError("redirect-limit", `More than ${maxRedirects} redirects.`);
+}
+
+async function readBytesCapped(response: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new SafeUrlError("size", `Response exceeded ${maxBytes} bytes.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
 async function readCapped(response: Response, maxBytes: number) {
   if (!response.body) return "";
   const reader = response.body.getReader();

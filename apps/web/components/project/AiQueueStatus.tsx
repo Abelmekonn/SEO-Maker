@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 /**
  * Live progress for queued AI work.
  *
- * On a provider tier measured in tokens per minute, a page takes minutes, not
+ * A page's AI work takes a minute or two, not
  * seconds. This shows what is running, how far through the batch it is, and
  * how long the rest should take, then refreshes the page when the work is
  * done, so nobody has to guess when to reload. Determinate progress for the

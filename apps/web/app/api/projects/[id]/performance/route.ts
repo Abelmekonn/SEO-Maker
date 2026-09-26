@@ -25,6 +25,15 @@ export async function POST(
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
+  // Enforced here and not only by the locked screen: a hidden button is not
+  // an access control.
+  if (!account.limits.performance) {
+    return NextResponse.json(
+      { error: `${account.limits.label} does not include PageSpeed runs. Upgrade to measure performance.`, upgrade: true },
+      { status: 402 },
+    );
+  }
+
   if (PERF_ACTIVE.has(project.perfStatus)) {
     return NextResponse.json(
       {

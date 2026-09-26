@@ -25,6 +25,7 @@ const TYPES: Array<{ value: string; label: string }> = [
   { value: "about", label: "About" },
   { value: "contact", label: "Contact" },
   { value: "legal", label: "Legal" },
+  { value: "utility", label: "Utility (login, cart, account, search)" },
   { value: "homepage", label: "Homepage" },
   { value: "other", label: "Something else" },
 ];

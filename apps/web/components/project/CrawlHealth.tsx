@@ -38,7 +38,7 @@ export function CrawlHealth({
       </div>
 
       <dl className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <Stat label="Discovered" value={crawl.discovered} />
+        <Stat label="Known pages" value={crawl.discovered} />
         <Stat label="Analyzed" value={crawl.analyzed} />
         <Stat label="Failed" value={crawl.failed} tone={crawl.failed > 0 ? "warn" : undefined} />
         <Stat label="Skipped" value={crawl.skipped} />
@@ -47,13 +47,13 @@ export function CrawlHealth({
 
       {plan?.sections?.length ? (
         <p className="text-sm leading-6 text-body">
-          Pages were sampled across{" "}
+          This crawl fetched pages across{" "}
           <span className="font-mono text-ink">{plan.sections.length}</span> sections of the site
           {plan.deferred ? (
             <>
               {" "}
-              — <span className="font-mono text-ink">{plan.deferred.toLocaleString()}</span> more
-              sitemap URLs did not fit this crawl&rsquo;s page limit
+              — <span className="font-mono text-ink">{plan.deferred.toLocaleString()}</span> other
+              known {plan.deferred === 1 ? "page was" : "pages were"} not chosen for it and kept their last results
             </>
           ) : null}
           .

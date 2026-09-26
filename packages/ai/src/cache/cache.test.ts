@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PROMPT_VERSION } from "../config";
 import { buildInputHash } from "./index";
 
 const base = {
@@ -51,5 +52,12 @@ describe("buildInputHash", () => {
 
   it("treats absent and null business context as the same", () => {
     expect(buildInputHash({ ...base, businessContext: null })).toBe(buildInputHash(base));
+  });
+});
+
+describe("buildInputHash per-feature prompt versions", () => {
+  it("hashes a page feature exactly as the single global version did", () => {
+    // Existing cached page results must keep their keys after the split.
+    expect(buildInputHash(base)).toBe(buildInputHash({ ...base, promptVersion: PROMPT_VERSION }));
   });
 });

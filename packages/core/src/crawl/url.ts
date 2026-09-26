@@ -87,6 +87,28 @@ export function normalizePageUrl(value: string): string | null {
 }
 
 /**
+ * `normalizePageUrl` with the reason a URL is not a page.
+ *
+ * The crawl inventory reports assets and unusable URLs separately rather than
+ * letting them vanish, so a sitemap full of PDFs reads as that, not as nothing.
+ */
+export function classifyUrl(value: string): { url: string; reason: null } | { url: null; reason: "invalid" | "asset" } {
+  const url = normalizePageUrl(value);
+  if (url) {
+    return { url, reason: null };
+  }
+  try {
+    const parsed = new URL(value);
+    if ((parsed.protocol === "http:" || parsed.protocol === "https:") && SKIP_PATH.test(parsed.pathname)) {
+      return { url: null, reason: "asset" };
+    }
+  } catch {
+    // Falls through: not a URL at all.
+  }
+  return { url: null, reason: "invalid" };
+}
+
+/**
  * A page's identity across crawls: host without "www.", then path and query,
  * from the normalized URL ("stripe.com", "stripe.com/pricing").
  *
@@ -100,6 +122,21 @@ export function normalizePageUrl(value: string): string | null {
 export function pageKeyOf(url: string): string {
   const normalized = normalizePageUrl(url) ?? url;
   return normalized.replace(/^https?:\/\/(?:www\.)?/i, "").replace(/\/+(?=$|\?)/, "");
+}
+
+/**
+ * Every URL identity a crawled page answers to: the address that answered,
+ * and the one it was requested at when it redirected. The site's page
+ * inventory lists the requested address, so a page that redirects is matched
+ * to its inventory entry through the redirect it recorded.
+ */
+export function pageKeysOf(page: { url: string; finalUrl?: string | null; evidence?: unknown }): string[] {
+  const keys = new Set([pageKeyOf(page.url)]);
+  if (page.finalUrl) keys.add(pageKeyOf(page.finalUrl));
+  const chain = (page.evidence as { redirectChain?: Array<{ from?: unknown }> } | null | undefined)?.redirectChain;
+  const from = Array.isArray(chain) ? chain[0]?.from : undefined;
+  if (typeof from === "string" && from) keys.add(pageKeyOf(from));
+  return [...keys];
 }
 
 /** Resolves `href` against `base` and normalizes it. Null when unusable. */

@@ -14,19 +14,27 @@ export * from "./knowledge";
 export * from "./context";
 export * from "./cache";
 export * from "./features/page";
+export * from "./features/site";
+export * from "./features/site-strategy";
+export * from "./features/competitor";
+export * from "./features/grounding";
+export * from "./site/sync";
+export * from "./competitors/sync";
 
 import { prisma } from "@seo-maker/db";
 import type { z } from "zod";
 import {
-  PROMPT_VERSION,
   estimateCost,
+  promptVersionFor,
   loadAiConfig,
-  resolveModel,
+  primaryProviderFor,
+  routeKey,
+  routesFor,
   type AiFeature,
   type AiMode,
   type Plan,
 } from "./config";
-import { AiError, generateStructured, type GenerateOptions } from "./provider";
+import { AiError, type AiImage, type GenerateOptions, generateWithFallback } from "./provider";
 import { buildInputHash, findCachedResult } from "./cache";
 import { buildKnowledgeContext } from "./context";
 import { retrieveKnowledge, type KnowledgeBundle, type KnowledgeQuery } from "./knowledge";
@@ -34,21 +42,32 @@ import { retrieveKnowledge, type KnowledgeBundle, type KnowledgeQuery } from "./
 export type RunAiFeatureInput<T> = {
   feature: AiFeature;
   mode: AiMode;
-  schema: z.ZodType<T>;
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   projectId: string;
   pageId?: string | null;
   /** The page's URL identity (pageKeyOf). Page results are read by it. */
   pageKey?: string | null;
+  /** The competitor a competitor-level result is about. */
+  competitorId?: string | null;
   plan?: Plan | null;
 
   /** Which knowledge to retrieve. Omit to skip grounding entirely. */
   knowledge?: KnowledgeQuery;
 
   /**
-   * Builds the user message. Receives the rendered knowledge block so the
-   * prompt decides where grounding goes, rather than this module guessing.
+   * Builds the prompt. Receives the rendered knowledge block so the prompt
+   * decides where grounding goes, rather than this module guessing, and
+   * whether `images` will reach the model: a provider that cannot see images
+   * gets a prompt that does not mention them.
    */
-  buildPrompt: (knowledgeBlock: string, bundle: KnowledgeBundle) => { system: string; user: string };
+  buildPrompt: (
+    knowledgeBlock: string,
+    bundle: KnowledgeBundle,
+    options: { imagesAttached: boolean },
+  ) => { system: string; user: string };
+
+  /** Images for a provider that accepts them (alt text from the image itself). */
+  images?: AiImage[];
 
   /** Hashed into the cache key. Must contain everything that shapes the answer. */
   evidence: unknown;
@@ -64,9 +83,9 @@ export type RunAiFeatureInput<T> = {
    * also trim the output (drop the one invented target, keep the rest). A
    * failure is recorded as an invalid result, never stored as output.
    */
-  refine?: (data: T) => { ok: true; data: T } | { ok: false; reason: string };
+  refine?: (data: T, context: { imagesSent: boolean }) => { ok: true; data: T } | { ok: false; reason: string };
   signal?: AbortSignal;
-  generateOptions?: GenerateOptions;
+  generateOptions?: Omit<GenerateOptions, "provider">;
 };
 
 export type RunAiFeatureResult<T> =
@@ -82,12 +101,16 @@ export type RunAiFeatureResult<T> =
  */
 export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunAiFeatureResult<T>> {
   const config = loadAiConfig();
-  const model = resolveModel({ plan: input.plan, feature: input.feature, mode: input.mode }, config);
+  const routes = routesFor(input.feature, config);
+  // The cache key names the routed provider and model, whichever provider
+  // ends up answering, so a configuration change never serves a stale entry.
+  const model = routeKey(input.feature, config);
+  const primary = primaryProviderFor(input.feature, config);
 
-  if (!config.enabled) {
+  if (!config.enabled || routes.length === 0) {
     return {
       status: "failed",
-      error: new AiError("not-configured", "AI_API_KEY is not set, so AI features are disabled."),
+      error: new AiError("not-configured", "No AI provider is configured, so AI features are disabled."),
       aiResultId: null,
     };
   }
@@ -111,14 +134,20 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
       // Re-validate: a schema can tighten between runs, and a cached result that
       // no longer satisfies the contract must not be served.
       const parsed = input.schema.safeParse(cached.output);
-      const refined = parsed.success ? (input.refine ? input.refine(parsed.data) : { ok: true as const, data: parsed.data }) : null;
+      const refined = parsed.success
+        ? input.refine
+          ? input.refine(parsed.data, { imagesSent: false })
+          : { ok: true as const, data: parsed.data }
+        : null;
       if (refined?.ok) {
         // A hit from another page row (an earlier crawl of this page, or the
         // same page in another project) is recorded for this one: the input is
         // identical, so the answer holds, and without a row of its own this
         // page would read as not analysed. No tokens are spent.
         const reused =
-          cached.pageId === (input.pageId ?? null) && cached.projectId === input.projectId
+          cached.pageId === (input.pageId ?? null) &&
+          cached.projectId === input.projectId &&
+          cached.competitorId === (input.competitorId ?? null)
             ? cached.id
             : (
                 await prisma.aiResult.create({
@@ -126,6 +155,7 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
                     projectId: input.projectId,
                     pageId: input.pageId ?? null,
                     pageKey: input.pageKey ?? null,
+                    competitorId: input.competitorId ?? null,
                     feature: input.feature,
                     mode: input.mode,
                     provider: cached.provider,
@@ -154,32 +184,31 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
   }
 
   const knowledgeBlock = buildKnowledgeContext(bundle);
-  const { system, user } = input.buildPrompt(knowledgeBlock, bundle);
 
   if (input.signal?.aborted) {
     return { status: "failed", error: new AiError("cancelled", "The AI call was cancelled."), aiResultId: null };
   }
 
   try {
-    const response = await generateStructured(
+    const response = await generateWithFallback(
       {
         feature: input.feature,
         mode: input.mode,
         schema: input.schema,
         schemaName: input.feature,
-        system,
-        user,
-        model,
         maxTokens: input.maxTokens,
         temperature: input.temperature,
         signal: input.signal,
+        images: input.images,
+        prompt: (imagesAttached) => input.buildPrompt(knowledgeBlock, bundle, { imagesAttached }),
       },
-      input.generateOptions,
+      routes,
+      { ...input.generateOptions, config },
     );
 
     let data = response.data;
     if (input.refine) {
-      const refined = input.refine(data);
+      const refined = input.refine(data, { imagesSent: Boolean(response.imagesSent) });
       if (!refined.ok) {
         throw new AiError("invalid-output", "Model output failed a grounding check.", {
           detail: refined.reason,
@@ -194,11 +223,12 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
         projectId: input.projectId,
         pageId: input.pageId ?? null,
         pageKey: input.pageKey ?? null,
+        competitorId: input.competitorId ?? null,
         feature: input.feature,
         mode: input.mode,
         provider: response.provider,
         model: response.model,
-        promptVersion: PROMPT_VERSION,
+        promptVersion: promptVersionFor(input.feature),
         knowledgeVersion: bundle.knowledgeVersion,
         inputHash,
         output: data as object,
@@ -238,11 +268,12 @@ export async function runAiFeature<T>(input: RunAiFeatureInput<T>): Promise<RunA
         projectId: input.projectId,
         pageId: input.pageId ?? null,
         pageKey: input.pageKey ?? null,
+        competitorId: input.competitorId ?? null,
         feature: input.feature,
         mode: input.mode,
-        provider: config.provider,
-        model,
-        promptVersion: PROMPT_VERSION,
+        provider: primary,
+        model: config.providers[primary].model,
+        promptVersion: promptVersionFor(input.feature),
         knowledgeVersion: bundle.knowledgeVersion,
         inputHash,
         status: aiError.kind === "invalid-output" ? "invalid" : "failed",

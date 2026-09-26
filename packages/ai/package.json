@@ -9,11 +9,13 @@
     "./schemas": "./src/schemas/index.ts",
     "./knowledge": "./src/knowledge/index.ts",
     "./context": "./src/context/index.ts",
-    "./features": "./src/features/page.ts"
+    "./features": "./src/features/page.ts",
+    "./eval": "./src/eval/index.ts"
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "benchmark": "tsx scripts/benchmark.ts"
   },
   "dependencies": {
     "@seo-maker/core": "workspace:*",
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "tsx": "^4.20.6",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   }

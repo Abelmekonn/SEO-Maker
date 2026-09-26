@@ -6,7 +6,6 @@ import {
   ArrowUp,
   CircleDot,
   Crosshair,
-  Lightbulb,
   Sparkles,
   Swords,
   Workflow,
@@ -16,12 +15,14 @@ import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import {
   AiAssistantCard,
   CompetitorCard,
-  KeyInsightsCard,
   NextActions,
+  TopOpportunities,
+  type TopOpportunity,
   groupFindings,
 } from "@/components/project/OverviewInsights";
+import { NewPagesDialog } from "@/components/project/NewPagesDialog";
 import { OverviewPageTable } from "@/components/project/OverviewPageTable";
-import { OverviewProblems } from "@/components/project/OverviewProblems";
+import { OverviewProblems, type ProblemInsight } from "@/components/project/OverviewProblems";
 import { LockedCard } from "@/components/project/PremiumGate";
 import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { ScoreRing } from "@/components/project/ScoreRing";
@@ -35,7 +36,9 @@ import {
   siteSeoScore,
   technicalCheckIds,
 } from "@/lib/page-audit";
-import type { PlanId } from "@/lib/plan";
+import { analysisScope } from "@/lib/analysis-scope";
+import { crawlCounts } from "@/lib/crawl-counts";
+import { type PlanId, planLimits } from "@/lib/plan";
 import { findHomepage, normalizeSiteUrl } from "@/lib/site-url";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +49,7 @@ export function SiteOverview({
   plan,
   planLabel,
   maxPages,
+  notCrawled,
   mobile,
   desktop,
   history,
@@ -53,11 +57,15 @@ export function SiteOverview({
   homepageAi,
   analysedPages,
   aiEnabled,
+  opportunities = [],
 }: {
   project: Project & { pages: Page[] };
   plan: PlanId;
   planLabel: string;
+  /** Pages one crawl can fetch on the plan. */
   maxPages: number;
+  /** Inventory pages with no result in the latest crawl. */
+  notCrawled: number;
   mobile: PerformanceAudit | null;
   desktop: PerformanceAudit | null;
   /** Finished crawls, newest first. Scores are snapshotted on each row. */
@@ -66,15 +74,21 @@ export function SiteOverview({
   homepageAi: PageAiResult | null;
   analysedPages: number;
   aiEnabled: boolean;
+  /** Top open site opportunities, premium only. Empty falls back to check groups. */
+  opportunities?: TopOpportunity[];
 }) {
   const homepage = findHomepage(project.pages, project.rootUrl);
   const parsed = normalizeSiteUrl(project.rootUrl);
   const hostname = "hostname" in parsed ? parsed.hostname : project.name;
   const premium = plan !== "free";
+  const limits = planLimits[plan];
 
-  // Free audits the homepage only; premium audits every crawled page.
-  const scopePages = premium ? project.pages : homepage ? [homepage] : [];
+  // A plan that analyzes Priority pages only (Free: the homepage) shows those;
+  // paid plans show every crawled page.
+  const scopePages = analysisScope(project.pages, project.rootUrl, planLimits[plan]);
   const crawledPages = scopePages.filter(isCrawled);
+  // Pages crawled into the system: 9 of 10 when one failed.
+  const crawl = crawlCounts(scopePages);
   const homepagePerf = mobile?.performance ?? desktop?.performance ?? null;
   const scores = {
     overall: siteSeoScore(scopePages),
@@ -91,7 +105,53 @@ export function SiteOverview({
   const timeline = [...history].reverse().filter((crawl) => crawl.seoScore != null);
   const series = (key: "seoScore" | "technicalScore" | "onPageScore") =>
     timeline.map((crawl) => (crawl[key] == null ? null : Math.round(crawl[key] as number)));
-  const groups = premium ? groupFindings(scopePages) : [];
+  const groups = groupFindings(scopePages);
+  // Key insights lead the Problems Found section: the checks that fail on the
+  // most pages, worst first, then what else the user should know.
+  const insights: ProblemInsight[] = [
+    ...groups.slice(0, 4).map(
+      (group): ProblemInsight => ({
+        key: group.checkId,
+        kind: "check",
+        title: group.label,
+        detail: `${group.pages.length} ${group.pages.length === 1 ? "page" : "pages"} affected`,
+        tone: group.status === "fail" ? "bad" : "warn",
+        href:
+          group.pages.length === 1
+            ? `/projects/${project.id}/pages/${group.pages[0].id}`
+            : `/projects/${project.id}/pages`,
+      }),
+    ),
+    homepagePerf == null
+      ? {
+          key: "performance",
+          kind: "other",
+          title: "PageSpeed",
+          detail: "Not run yet",
+          tone: "warn",
+          href: `/projects/${project.id}/performance`,
+        }
+      : {
+          key: "performance",
+          kind: "other",
+          title: "Mobile performance",
+          detail: `${Math.round(homepagePerf)}/100`,
+          tone: homepagePerf >= 90 ? "good" : homepagePerf >= 50 ? "warn" : "bad",
+          href: `/projects/${project.id}/performance`,
+        },
+    ...(notCrawled > 0
+      ? [
+          {
+            key: "not-crawled",
+            kind: "other" as const,
+            title: "Not crawled yet",
+            detail: `${notCrawled.toLocaleString()} known ${notCrawled === 1 ? "page" : "pages"}`,
+            tone: "warn" as const,
+            href: `/projects/${project.id}/crawl`,
+          },
+        ]
+      : []),
+  ];
   const health = { optimized: 0, issues: 0, warnings: 0, critical: 0 };
   for (const page of crawledPages) {
     const verdict = pageHealth(page);
@@ -124,18 +184,22 @@ export function SiteOverview({
               {lastCrawl
                 ? `Last crawled ${formatRelative(lastCrawl)}. `
                 : "Not crawled yet. "}
-              {premium
-                ? `${crawledPages.length} ${crawledPages.length === 1 ? "page" : "pages"} analyzed.`
-                : "Free plan checks your homepage."}
+              {limits.analyzeStandardPages
+                ? `${crawl.crawled} of ${crawl.total} ${crawl.total === 1 ? "page" : "pages"} crawled${crawl.failed ? `, ${crawl.failed} failed` : ""}.`
+                : limits.maxPages === 1
+                  ? "Your homepage, fully analyzed."
+                  : `${crawledPages.length} Priority ${crawledPages.length === 1 ? "page" : "pages"} analyzed, up to ${limits.priorityPages}.`}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <RecrawlButton
+          <NewPagesDialog
             projectId={project.id}
             maxPages={maxPages}
-            appearance="primary"
+            heldPages={crawlCounts(project.pages).total}
+            planLabel={planLabel}
           />
+          <RecrawlButton projectId={project.id} appearance="primary" />
         </div>
       </header>
 
@@ -190,10 +254,10 @@ export function SiteOverview({
             />
           </section>
 
-          {premium ? (
+          {crawledPages.length > 0 ? (
             <section
               aria-label="Site charts"
-              className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
+              className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
             >
               <Card>
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -268,30 +332,10 @@ export function SiteOverview({
               </Card>
             </section>
           ) : null}
-
-          <OverviewProblems
-            pages={scopePages}
-            projectId={project.id}
-            detailed={premium}
-          />
-
-          <section
-            aria-label="Page analysis"
-            className="flex min-h-0 flex-1 flex-col gap-3"
-          >
-            <OverviewPageTable
-              pages={scopePages}
-              projectId={project.id}
-              homepageId={homepage?.id ?? null}
-              homepagePerf={scores.performance}
-            />
-          </section>
-
-          {premium ? <NextActions projectId={project.id} groups={groups} /> : null}
         </div>
 
-        {premium ? (
-          <aside className="flex flex-col gap-4">
+        <aside className="flex flex-col gap-4">
+          {limits.ai ? (
             <AiAssistantCard
               projectId={project.id}
               homepageId={homepage?.id ?? null}
@@ -300,38 +344,45 @@ export function SiteOverview({
               totalPages={crawledPages.length}
               aiEnabled={aiEnabled}
             />
-            <CompetitorCard projectId={project.id} competitors={competitors} />
-            <KeyInsightsCard
-              projectId={project.id}
-              groups={groups}
-              crawledCount={crawledPages.length}
-              crawl={history[0] ?? null}
-              performance={homepagePerf}
-            />
-          </aside>
-        ) : (
-          <aside className="flex flex-col gap-4">
+          ) : (
             <LockedCard
               title="AI Assistant"
               icon={<Sparkles className="size-4 text-primary" aria-hidden />}
               body="Get a plain-language explanation of each problem and a drafted fix, grounded in your pages."
               preview={<SkeletonLines rows={5} />}
             />
+          )}
+          {limits.maxCompetitors > 0 ? (
+            <CompetitorCard projectId={project.id} competitors={competitors} />
+          ) : (
             <LockedCard
               title="Competitor analysis"
               icon={<Swords className="size-4 text-body" aria-hidden />}
-              body="See who ranks for your queries and where their pages beat yours."
+              body="Compare your site with competitors, and let Competitor AI say where they are ahead and what you could do."
               preview={<SkeletonRows rows={4} />}
             />
-            <LockedCard
-              title="Key insights"
-              icon={<Lightbulb className="size-4 text-body" aria-hidden />}
-              body="Prioritized insights across your whole site, not just the homepage."
-              preview={<SkeletonRows rows={3} />}
-            />
-          </aside>
-        )}
+          )}
+        </aside>
       </div>
+
+      {/* Full width below the fold of cards: the problems, led by their key
+          insights, and the page table use the whole content width. */}
+      <OverviewProblems pages={scopePages} projectId={project.id} detailed insights={insights} />
+
+      <section aria-label="Page analysis" className="flex min-h-0 flex-col gap-3">
+        <OverviewPageTable
+          pages={scopePages}
+          projectId={project.id}
+          homepageId={homepage?.id ?? null}
+          homepagePerf={scores.performance}
+        />
+      </section>
+
+      {premium && opportunities.length > 0 ? (
+        <TopOpportunities projectId={project.id} rows={opportunities} />
+      ) : (
+        <NextActions projectId={project.id} groups={groups} />
+      )}
     </div>
   );
 }

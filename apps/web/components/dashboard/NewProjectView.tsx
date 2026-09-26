@@ -9,6 +9,7 @@ import {
   ListChecks,
   Lock,
   Radar,
+  Zap,
 } from "lucide-react";
 import { GoPremiumButton } from "@/components/project/PremiumGate";
 import { UrlIntakeForm } from "@/components/project/UrlIntakeForm";
@@ -50,10 +51,8 @@ export function NewProjectView({
     },
     {
       icon: FileSearch,
-      title: premium ? "You get the exact error and fix" : "You see what is wrong",
-      body: premium
-        ? "Each problem comes with the evidence the crawler saw and how to fix it."
-        : "Every failing check on your homepage, ranked by severity.",
+      title: "You get the exact error and fix",
+      body: "Each problem comes with the evidence the crawler saw, and AI recommendations when you ask for them.",
     },
   ];
 
@@ -161,11 +160,27 @@ export function NewProjectView({
               </span>
             </div>
             <ul className="flex flex-col gap-2.5 text-sm">
-              <PlanLine on label={maxPages === 1 ? "Homepage audit" : `${maxPages} pages per crawl`} icon={Gauge} />
-              <PlanLine on={premium} label="Exact errors and fixes" />
-              <PlanLine on={account.limits.deepMode} label="Deep business context" />
-              <PlanLine on={account.limits.maxCompetitors > 0} label="Competitor analysis" />
-              <PlanLine on={account.limits.ai} label="AI suggestions" />
+              <PlanLine on label={maxPages === 1 ? "Homepage Deep Analysis" : `${maxPages} pages per crawl`} icon={Gauge} />
+              <PlanLine on label="Quick Search" />
+              <PlanLine on={account.limits.performance} label={maxPages === 1 ? "Homepage performance" : "Performance"} />
+              <PlanLine
+                on={account.limits.ai}
+                label={
+                  account.limits.aiDailyLimit != null
+                    ? `Page AI: ${account.limits.aiDailyLimit} a day, ${account.limits.aiWeeklyLimit} a week`
+                    : "Page AI on every page"
+                }
+              />
+              <PlanLine on={account.limits.siteAi} label="Site AI" />
+              <PlanLine on={account.limits.competitorAi} label="Competitor AI" />
+              <PlanLine
+                on
+                label={
+                  account.limits.recrawlsPerSite == null
+                    ? "Unlimited re-crawls"
+                    : `${account.limits.recrawlsPerSite} re-crawl per site`
+                }
+              />
             </ul>
             {premium ? null : <GoPremiumButton className="w-full" />}
           </section>
@@ -236,12 +251,20 @@ function LimitNotice({
             {planLabel} includes {maxProjects === 1 ? "1 website" : `${maxProjects} websites`}.
             {premium
               ? " Remove a website or contact us for a larger plan."
-              : " Go premium to audit more sites and every page on them."}
+              : " Go premium to audit more sites and every page on them."}{" "}
+            Quick Search still works for any URL.
           </p>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         {premium ? null : <GoPremiumButton />}
+        <Link
+          href="/quick-search"
+          className="inline-flex h-11 items-center gap-1.5 rounded-md px-4 font-mono text-sm text-ink ring-1 ring-hairline hover:bg-surface-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Zap className="size-3.5" aria-hidden />
+          Quick Search
+        </Link>
         {existing ? (
           <Link
             href={`/projects/${existing.id}`}

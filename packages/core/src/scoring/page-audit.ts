@@ -414,6 +414,11 @@ const RECOMMENDATION: Record<CheckId, string> = {
   sitemap: "Publish a sitemap and declare it in robots.txt.",
 };
 
+/** The deterministic recommendation for a check, worded as above. */
+export function checkRecommendation(check: CheckId): string {
+  return RECOMMENDATION[check];
+}
+
 /**
  * Projects a crawled page into the issue records to persist.
  *

@@ -137,7 +137,6 @@ export type FeatureResult = {
   knowledgeVersion: string | null;
   error: string | null;
   createdAt: Date;
-  estimatedCost: number | null;
   /** Re-validated against the feature's contract; null when failed or no longer valid. */
   data: unknown;
 };
@@ -153,7 +152,7 @@ export async function getPageFeatureResults(projectId: string, pageKey: string):
   const rows = await prisma.aiResult.findMany({
     where: { projectId, pageKey, feature: { not: "page-recommendation" } },
     orderBy: { createdAt: "desc" },
-    select: { ...SELECT, estimatedCost: true },
+    select: SELECT,
   });
 
   const byFeature = new Map<string, FeatureResult>();
@@ -171,23 +170,14 @@ export async function getPageFeatureResults(projectId: string, pageKey: string):
       knowledgeVersion: row.knowledgeVersion,
       error: row.error,
       createdAt: row.createdAt,
-      estimatedCost: row.estimatedCost,
       data: parsed?.success ? parsed.data : null,
     });
   }
   return byFeature;
 }
 
-/**
- * Whether an AI provider is configured.
- *
- * Read on the server so the UI can explain that AI is switched off rather than
- * offering a button that always fails. Mirrors `loadAiConfig().enabled`, but
- * reads the variable directly to avoid pulling provider code into the bundle.
- */
-export function aiConfigured(): boolean {
-  return Boolean(process.env.AI_API_KEY?.trim());
-}
+/** Whether any AI provider is configured. */
+export { aiConfigured } from "@/lib/ai-access";
 
 /**
  * A stored AI error in words a user can act on.
@@ -200,24 +190,18 @@ export function friendlyAiError(error: string | null): string {
   const text = error ?? "";
   const kind = text.split("|")[0]?.trim();
   if (kind === "rate-limited") {
-    return /per day|TPD|RPD/i.test(text)
-      ? "The AI provider's daily limit for this key is used up. It resets within 24 hours; run it again then."
-      : "The AI provider's per-minute limit was reached while other pages were running. Run it again in a minute.";
+    return /per day|TPD|RPD|PerDay/i.test(text)
+      ? "The AI service reached its daily limit. Try again tomorrow."
+      : "The AI service was busy. Try again in a minute.";
   }
-  if (kind === "auth") {
-    return /network|region|VPN/i.test(text)
-      ? "The AI provider refused this network (region or VPN), not the key."
-      : "The AI provider rejected the API key. Check AI_API_KEY and restart the worker.";
-  }
-  if (kind === "timeout") return "The AI provider took too long to answer. Run it again.";
   if (kind === "invalid-output") {
     return /grounding check/i.test(text)
       ? "The answer failed a grounding check (it referred to something the crawl did not find), so it was not stored."
-      : "The model's answer did not match the expected format and was not stored. Run it again.";
+      : "The answer did not match the expected format and was not stored. Try again.";
   }
-  if (kind === "not-configured") return "No AI provider is configured. Set AI_API_KEY and restart the worker.";
-  if (/model_not_found|does not exist/i.test(text)) {
-    return "The configured AI model is not available to this key. Change AI_MODEL.";
+  if (kind === "timeout") return "The AI service took too long to answer. Try again.";
+  if (kind === "auth" || kind === "not-configured" || kind === "unavailable") {
+    return "AI is temporarily unavailable. Try again later.";
   }
-  return "The AI call did not finish. Run it again.";
+  return "The AI request did not finish. Try again.";
 }

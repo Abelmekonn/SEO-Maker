@@ -1,27 +1,46 @@
 import { NextResponse } from "next/server";
+import { buildSiteContext, imageInputAvailable, linkTargetCount } from "@seo-maker/ai";
+import {
+  type PageAiOutput,
+  featuresForOutputs,
+  fixPlanInputFromPage,
+  isPageAiOutput,
+  pageOutputAvailability,
+} from "@seo-maker/core/page";
 import { AI_PAGE_FEATURES, type AiPageFeature } from "@seo-maker/core/queue";
 import { prisma } from "@seo-maker/db";
-import { aiConfigured } from "@/lib/ai-results";
-import { getAiUsage } from "@/lib/ai-usage";
+import {
+  aiConfigured,
+  capabilityDenied,
+  homepageDenied,
+  isHomepage,
+  notConfigured,
+  refund,
+  requestKeyOf,
+  reserveGeneration,
+} from "@/lib/ai-access";
 import { pageKeyIndex } from "@/lib/page-results";
 import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { enqueueAiPageAnalysis, getAiQueueJobs } from "@/lib/queue";
 
 /**
- * Queues grounded AI analysis.
+ * Page AI: queues grounded AI analysis. Only ever called by a user action.
  *
  * Body:
- *   { pageId, force?, features? }  one page; `features` narrows the run, and
- *                                  title/meta may be requested on a page whose
- *                                  checks pass
- *   { next: N, force? }            the N worst pages not analysed yet
- *   {}                             every page with something to explain
+ *   { pageId, outputs?, force?, requestId? }   one page. `outputs` names what to
+ *                                              write (metadata, content, headings,
+ *                                              schema, alt-text, internal-links,
+ *                                              analysis); omit it to explain every
+ *                                              failing check and fix what AI can
+ *   { pageId, features? }                      the same, by worker feature name
+ *   { next: N, force? }                        the N worst pages not analysed yet
  *
- * Sized for a provider tier measured in tokens per minute and per day (Groq's
- * free tier by default): pages already waiting or running are never queued
- * twice, and a batch is refused or trimmed when today's token budget cannot
- * cover it, instead of queueing work that would fail on a rate limit.
+ * Each page queued is one generation from the user's allowance (Free: 2 a
+ * day, 10 a week, homepage only), reserved before the job is queued and
+ * settled by the worker: nothing new generated, nothing charged. A request
+ * that cannot produce anything (no evidence for the outputs asked for, the
+ * same page already queued) is answered without charging.
  */
 
 const SEVERITY_WEIGHT: Record<string, number> = { critical: 8, high: 4, medium: 2, low: 1 };
@@ -33,26 +52,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Sign in to run analysis." }, { status: 401 });
   }
 
-  // Plan gate before the provider check: a free user should be told they need
-  // to upgrade, not that the server is missing a key. Enforced here and not
-  // only in the UI, because a hidden button is not an access control.
+  // Plan before provider: a user whose plan lacks the feature is told how to
+  // get it, not that the server is missing something.
   const account = await getAccountForUser(userId);
-  if (!account.limits.ai) {
-    return NextResponse.json(
-      {
-        error: `${account.limits.label} finds the problems on your pages. AI explanations and fixes are a paid feature.`,
-        upgrade: true,
-      },
-      { status: 402 },
-    );
-  }
-
-  if (!aiConfigured()) {
-    return NextResponse.json(
-      { error: "No AI provider is configured. Set AI_API_KEY and restart the worker." },
-      { status: 503 },
-    );
-  }
+  const denied = capabilityDenied(account, "page");
+  if (denied) return denied;
+  if (!aiConfigured()) return notConfigured();
 
   const { id } = await params;
   const project = await getProjectForUser(id, userId);
@@ -64,55 +69,151 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     pageId?: string;
     force?: boolean;
     features?: unknown;
+    outputs?: unknown;
     next?: unknown;
+    requestId?: unknown;
   };
+  const requestKey = requestKeyOf(request, body);
 
   const allowed = new Set<string>(AI_PAGE_FEATURES);
-  const features = Array.isArray(body.features)
+  const outputs = Array.isArray(body.outputs) ? body.outputs.filter(isPageAiOutput) : null;
+  if (Array.isArray(body.outputs) && outputs?.length === 0) {
+    return NextResponse.json({ error: "No valid outputs requested." }, { status: 400 });
+  }
+  const namedFeatures = Array.isArray(body.features)
     ? (body.features.filter((value) => typeof value === "string" && allowed.has(value)) as AiPageFeature[])
-    : undefined;
-  if (Array.isArray(body.features) && features?.length === 0) {
+    : null;
+  if (Array.isArray(body.features) && namedFeatures?.length === 0) {
     return NextResponse.json({ error: "No valid features requested." }, { status: 400 });
   }
+  const features: AiPageFeature[] | undefined = outputs
+    ? (featuresForOutputs(outputs) as AiPageFeature[])
+    : (namedFeatures ?? undefined);
+
   const next =
     typeof body.next === "number" && Number.isFinite(body.next)
       ? Math.max(1, Math.min(MAX_BATCH, Math.floor(body.next)))
       : null;
-
-  // Title and meta can be rewritten on request even when their check passes.
-  const onDemand = Boolean(body.pageId && features?.some((feature) => feature === "title" || feature === "meta"));
   const mode = project.analysisMode === "deep" ? "deep" : "quick";
 
-  const candidates = body.pageId
-    ? project.pages.filter((page) => page.id === body.pageId)
-    : project.pages.filter((page) => page.status === "analyzed");
-  if (body.pageId && candidates.length === 0) {
-    return NextResponse.json({ error: "Page not found in this project." }, { status: 404 });
+  let queued: Awaited<ReturnType<typeof getAiQueueJobs>> = [];
+  try {
+    queued = await getAiQueueJobs(project.id);
+  } catch {
+    return NextResponse.json({ error: "The AI queue is offline. Please try again shortly." }, { status: 503 });
   }
 
+  // ------------------------------------------------------------ one page
+  if (body.pageId) {
+    const page = project.pages.find((row) => row.id === body.pageId);
+    if (!page) {
+      return NextResponse.json({ error: "Page not found in this project." }, { status: 404 });
+    }
+    const homepageOnly = homepageDenied(account, page, project.rootUrl);
+    if (homepageOnly) return homepageOnly;
+    if (page.status !== "analyzed") {
+      return NextResponse.json(
+        {
+          error:
+            page.status === "crawling"
+              ? "This page is being fetched. Try again when it finishes."
+              : "This page was not analysed in the last crawl, so there is no evidence to work from.",
+        },
+        { status: 409 },
+      );
+    }
+
+    // Same page already waiting or running: say so, charge nothing.
+    if (queued.some((job) => job.pageId === page.id)) {
+      return NextResponse.json({ ok: true, queued: 0, message: "Already in the queue. Progress is shown here." });
+    }
+
+    // Only ask for what the page has the evidence for; refuse, uncharged,
+    // when nothing asked for can be written.
+    const [site, issues] = await Promise.all([
+      buildSiteContext(project.id),
+      prisma.pageIssue.findMany({ where: { pageId: page.id }, select: { checkId: true, status: true, severity: true } }),
+    ]);
+    const self = page.finalUrl ?? page.url;
+    const availability = pageOutputAvailability(
+      fixPlanInputFromPage({ ...page, issues }, site ? linkTargetCount(site, self) : 0, {
+        imageInput: imageInputAvailable("image-alt"),
+      }),
+    );
+    if (outputs) {
+      const possible = outputs.filter((output) => availability[output].available);
+      if (possible.length === 0) {
+        return NextResponse.json(
+          { error: availability[outputs[0] as PageAiOutput].reason, code: "no-evidence" },
+          { status: 422 },
+        );
+      }
+    } else if (!features && issues.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        queued: 0,
+        message: "Every check passes on this page, so there is nothing to explain. Ask for a specific output instead.",
+      });
+    }
+
+    const reservation = await reserveGeneration({
+      userId,
+      account,
+      scope: "page",
+      projectId: project.id,
+      siteKey: project.siteKey,
+      pageKey: pageKeyIndex([page]).keyById.get(page.id) ?? null,
+      features: features ?? ["analysis"],
+      requestKey,
+    });
+    if (!reservation.ok) return reservation.response;
+    if (reservation.replayed) {
+      return NextResponse.json({ ok: true, queued: 0, message: "Already requested. Progress is shown here.", quota: reservation.quota });
+    }
+
+    try {
+      await enqueueAiPageAnalysis({
+        projectId: project.id,
+        pageId: page.id,
+        mode,
+        features,
+        force: body.force ?? false,
+        usageId: reservation.usageId,
+      });
+    } catch (error) {
+      console.error("Failed to enqueue AI analysis", error);
+      await refund(reservation.usageId, "could not queue");
+      return NextResponse.json({ error: "The AI queue is offline. Please try again shortly." }, { status: 503 });
+    }
+    return NextResponse.json({ ok: true, queued: 1, mode, quota: reservation.quota });
+  }
+
+  // ------------------------------------------------------------ a batch
+  // A plan with a per-user allowance analyses one page at a time, by choice.
+  if (account.limits.aiHomepageOnly || account.limits.aiDailyLimit != null) {
+    return NextResponse.json(
+      { error: `${account.limits.label} analyses one page at a time. Open the page and choose what to generate.`, upgrade: account.plan === "free" },
+      { status: 402 },
+    );
+  }
+
+  const candidates = project.pages.filter((page) => page.status === "analyzed");
   const pageIds = candidates.map((page) => page.id);
   const keys = pageKeyIndex(candidates);
-  const [issues, explained, usage] = await Promise.all([
-    prisma.pageIssue.findMany({
-      where: { pageId: { in: pageIds } },
-      select: { pageId: true, severity: true },
-    }),
+  const [issues, explained] = await Promise.all([
+    prisma.pageIssue.findMany({ where: { pageId: { in: pageIds } }, select: { pageId: true, severity: true } }),
     // By page URL. Only a result written after this crawl fetched the page
-    // counts as done: one from an earlier crawl is refreshed by the batch
-    // (free when the page is unchanged, the AI cache answers it).
-    next
-      ? prisma.aiResult.groupBy({
-          by: ["pageKey"],
-          where: {
-            projectId: project.id,
-            pageKey: { in: [...keys.idByKey.keys()] },
-            feature: "page-recommendation",
-            status: "ok",
-          },
-          _max: { createdAt: true },
-        })
-      : [],
-    getAiUsage(),
+    // counts as done: one from an earlier crawl is refreshed by the batch.
+    prisma.aiResult.groupBy({
+      by: ["pageKey"],
+      where: {
+        projectId: project.id,
+        pageKey: { in: [...keys.idByKey.keys()] },
+        feature: "page-recommendation",
+        status: "ok",
+      },
+      _max: { createdAt: true },
+    }),
   ]);
 
   const weight = new Map<string, number>();
@@ -120,24 +221,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     weight.set(issue.pageId, (weight.get(issue.pageId) ?? 0) + (SEVERITY_WEIGHT[issue.severity] ?? 1));
   }
 
-  let queued: string[] = [];
-  try {
-    queued = (await getAiQueueJobs(project.id)).map((job) => job.pageId);
-  } catch {
-    return NextResponse.json({ error: "Queue is not running. Start Redis and the worker." }, { status: 503 });
-  }
-  const alreadyQueued = new Set(queued);
-
-  // One batch at a time. A second "next N" while one is running would queue
-  // the next worst pages behind it, which on a free tier spends a day's
-  // budget on a double click. Single-page requests are still allowed.
-  if (next && queued.length > 0) {
+  // One batch at a time: a second press while one runs would queue the next
+  // worst pages behind it.
+  if (queued.length > 0) {
     return NextResponse.json({
       ok: true,
       queued: 0,
       message: `A batch is already running (${queued.length} ${queued.length === 1 ? "page" : "pages"} left). Progress is shown here.`,
     });
   }
+
   const createdById = new Map(candidates.map((page) => [page.id, page.createdAt]));
   const done = new Set(
     explained.flatMap((row) => {
@@ -148,79 +241,65 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }),
   );
 
-  let targets = candidates.filter((page) => weight.has(page.id) || onDemand);
-  const skippedQueued = targets.filter((page) => alreadyQueued.has(page.id)).length;
-  targets = targets.filter((page) => !alreadyQueued.has(page.id));
-
-  if (next) {
-    // Worst pages first: severity-weighted issue count, and pages the AI has
-    // not explained yet before ones it has.
-    targets = targets
-      .filter((page) => body.force || !done.has(page.id))
-      .sort((a, b) => (weight.get(b.id) ?? 0) - (weight.get(a.id) ?? 0))
-      .slice(0, next);
-  }
+  // Priority pages first: they carry the page text the model grounds its
+  // advice in. Within each tier, worst first by severity-weighted issues.
+  const standard = (page: { crawlTier: string | null }) => (page.crawlTier === "standard" ? 1 : 0);
+  const homeFirst = (page: (typeof candidates)[number]) => (isHomepage(page, project.rootUrl) ? 0 : 1);
+  const targets = candidates
+    .filter((page) => weight.has(page.id))
+    .filter((page) => body.force || !done.has(page.id))
+    .sort(
+      (a, b) =>
+        homeFirst(a) - homeFirst(b) || standard(a) - standard(b) || (weight.get(b.id) ?? 0) - (weight.get(a.id) ?? 0),
+    )
+    .slice(0, next ?? MAX_BATCH);
 
   if (targets.length === 0) {
     return NextResponse.json({
       ok: true,
       queued: 0,
-      message:
-        skippedQueued > 0
-          ? "Already in the queue. Progress is shown here."
-          : next
-            ? "Every page with issues has been analysed. Use Re-analyse on a page to run it again."
-            : "Nothing to analyse. These pages have no failing checks.",
+      message: "Every page with issues has been analysed. Use Re-analyse on a page to run it again.",
     });
   }
 
-  // Budget guard. A single page is allowed while anything is left; a batch is
-  // trimmed to what the rest of today's budget covers.
-  if (usage.remaining < Math.min(usage.tokensPerPage, 4_000)) {
-    return NextResponse.json(
-      {
-        error: `Today's AI budget for this key is used up (${usage.tokens24h.toLocaleString()} of ${usage.budget.toLocaleString()} tokens). It frees up over the next 24 hours.`,
-        budget: true,
-      },
-      { status: 429 },
-    );
-  }
-  let trimmed = 0;
-  if (targets.length > 1 && targets.length > usage.pagesLeftToday) {
-    const keep = Math.max(1, usage.pagesLeftToday);
-    trimmed = targets.length - keep;
-    targets = targets.slice(0, keep);
-  }
-
-  try {
-    await Promise.all(
-      targets.map((page) =>
-        enqueueAiPageAnalysis({
-          projectId: project.id,
-          pageId: page.id,
-          mode,
-          features,
-          force: body.force ?? false,
-        }),
-      ),
-    );
-  } catch (error) {
-    console.error("Failed to enqueue AI analysis", error);
-    return NextResponse.json(
-      { error: "Queue is not running. Start Redis and the worker." },
-      { status: 503 },
-    );
+  let count = 0;
+  for (const page of targets) {
+    const reservation = await reserveGeneration({
+      userId,
+      account,
+      scope: "page",
+      projectId: project.id,
+      siteKey: project.siteKey,
+      pageKey: keys.keyById.get(page.id) ?? null,
+      features: ["analysis"],
+    });
+    if (!reservation.ok) {
+      if (count === 0) return reservation.response;
+      break;
+    }
+    try {
+      await enqueueAiPageAnalysis({
+        projectId: project.id,
+        pageId: page.id,
+        mode,
+        force: body.force ?? false,
+        usageId: reservation.usageId,
+      });
+      count += 1;
+    } catch (error) {
+      console.error("Failed to enqueue AI analysis", error);
+      await refund(reservation.usageId, "could not queue");
+      if (count === 0) {
+        return NextResponse.json({ error: "The AI queue is offline. Please try again shortly." }, { status: 503 });
+      }
+      break;
+    }
   }
 
   return NextResponse.json({
     ok: true,
-    queued: targets.length,
+    queued: count,
     mode,
-    skippedQueued,
-    trimmed,
-    etaMinutes: (targets.length + queued.length) * usage.minutesPerPage,
-    message: trimmed
-      ? `Queued ${targets.length}. ${trimmed} more would exceed today's AI budget.`
-      : undefined,
+    message: count < targets.length ? `Queued ${count} of ${targets.length}. The rest can run later.` : undefined,
   });
 }

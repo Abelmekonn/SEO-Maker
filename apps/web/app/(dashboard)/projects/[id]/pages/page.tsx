@@ -5,6 +5,7 @@ import { RecrawlButton } from "@/components/project/RecrawlButton";
 import { StatusBadge } from "@/components/project/StatusBadge";
 import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
+import { loadInventory, uncrawledPages, withTiers } from "@/lib/site-inventory";
 import { normalizeSiteUrl } from "@/lib/site-url";
 
 export default async function ProjectPagesPage({
@@ -25,7 +26,12 @@ export default async function ProjectPagesPage({
   }
 
   const account = await getAccountForUser(userId);
-  const maxPages = Math.max(project.maxPages, account.limits.maxPages);
+  const maxPages = account.limits.maxPages;
+  // Crawled pages are counted as crawled; the inventory adds the pages
+  // discovered and not crawled, which the list shows for choosing.
+  const inventory = await loadInventory(project, account.limits);
+  const pages = withTiers(project.pages, inventory);
+  const uncrawled = uncrawledPages(inventory, project.pages);
   const parsed = normalizeSiteUrl(project.rootUrl);
   const hostname = "hostname" in parsed ? parsed.hostname : project.name;
   const lastCrawlAt = project.pages.reduce<Date | null>((latest, page) => {
@@ -51,9 +57,11 @@ export default async function ProjectPagesPage({
               </span>
             </div>
             <p className="max-w-2xl text-sm leading-6 text-body">
-              {maxPages > 1
-                ? `Thirteen checks on every crawled URL, up to ${maxPages} pages on ${account.limits.label}.`
-                : "Thirteen checks on the homepage, from status code to sitemap."}
+              {account.limits.analyzeStandardPages
+                ? `Every page SEO Maker knows on this site, and every check on the ones crawled. Priority pages carry their full content; Standard pages carry what the checks need. ${account.limits.label} crawls up to ${maxPages} pages at a time.`
+                : maxPages === 1
+                  ? `${account.limits.label} analyzes your homepage in full: every check, with its evidence.`
+                  : `Every check on up to ${account.limits.priorityPages} Priority pages. The rest of the crawl maps your site without being analyzed.`}
             </p>
           </div>
         </div>
@@ -64,14 +72,15 @@ export default async function ProjectPagesPage({
               {lastCrawlAt ? formatLastCrawl(lastCrawlAt) : "No crawl yet"}
             </p>
           </div>
-          <RecrawlButton projectId={project.id} maxPages={maxPages} appearance="primary" />
+          <RecrawlButton projectId={project.id} appearance="primary" />
         </div>
       </header>
       <PagesBoard
-        pages={project.pages}
+        pages={pages}
+        uncrawled={uncrawled}
         projectId={project.id}
-        maxPages={maxPages}
         planLabel={account.limits.label}
+        maxPages={maxPages}
       />
     </div>
   );

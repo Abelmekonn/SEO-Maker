@@ -7,6 +7,7 @@ import {
   parseBusinessContext,
   readBusinessContext,
 } from "@/lib/business-context";
+import { getAccountForUser } from "@/lib/plan";
 import { requireUserId } from "@/lib/projects";
 
 /** Business context for Deep analysis (Phase 0.6): read and edit after creation. */
@@ -42,12 +43,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-  const context = parseBusinessContext(body?.business ?? body);
-  const mode = isAnalysisMode(body?.mode)
+  const requested = parseBusinessContext(body?.business ?? body);
+  const requestedMode = isAnalysisMode(body?.mode)
     ? body.mode
-    : hasAnyContext(context)
+    : hasAnyContext(requested)
       ? "deep"
       : "quick";
+
+  // Deep analysis is a paid capability, here as when a project is created:
+  // a plan without it stays on Quick, and no business context is stored.
+  const account = await getAccountForUser(userId);
+  const allowDeep = account.limits.deepMode;
+  const mode = allowDeep ? requestedMode : "quick";
+  const context = allowDeep ? requested : parseBusinessContext(undefined);
 
   const updated = await prisma.project.update({
     where: { id: project.id },

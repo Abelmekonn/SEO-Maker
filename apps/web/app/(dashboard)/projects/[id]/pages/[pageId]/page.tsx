@@ -1,23 +1,28 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, ArrowUpRight } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Sparkles } from "lucide-react";
+import { buildSiteContext, imageInputAvailable, linkTargetCount } from "@seo-maker/ai";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/dashboard/shell";
 import { fixPlanInputFromPage, planFixes } from "@seo-maker/core/page";
-import { prisma } from "@seo-maker/db";
 import { AiQueueStatus } from "@/components/project/AiQueueStatus";
-import { AiRecommendations } from "@/components/project/AiRecommendations";
-import { PageChecks } from "@/components/project/PageChecks";
-import { PageEvidencePanel } from "@/components/project/PageEvidence";
-import { PageFixes } from "@/components/project/PageFixes";
+import { CrawlPageButton } from "@/components/project/CrawlPageButton";
+import { PageInspector } from "@/components/project/PageInspector";
 import { PremiumPage } from "@/components/project/PremiumGate";
-import { RecrawlButton } from "@/components/project/RecrawlButton";
+import { PriorityFetchButton } from "@/components/project/PriorityFetchButton";
+import { TierBadge } from "@/components/ai/TierBadge";
+import { CrawlRefresh } from "@/components/project/CrawlRefresh";
+import { isHomepage } from "@/lib/ai-access";
 import { StatusBadge } from "@/components/project/StatusBadge";
 import { aiConfigured, getPageFeatureResults, getPageRecommendation, isFromEarlierCrawl } from "@/lib/ai-results";
+import { analysisScope } from "@/lib/analysis-scope";
+import { isCrawled } from "@/lib/page-audit";
+import { type PageAnalysis, inspectPage } from "@/lib/page-inspector";
 import { keyOfPage } from "@/lib/page-results";
 import { getAccountForUser } from "@/lib/plan";
 import { getPageForUser, latestPages, requireUserId } from "@/lib/projects";
-import { findHomepage, pagePath } from "@/lib/site-url";
+import { getCrawlPageJobs } from "@/lib/queue";
+import { pagePath } from "@/lib/site-url";
 
 export default async function ProjectPageDetailPage({
   params,
@@ -38,40 +43,37 @@ export default async function ProjectPageDetailPage({
 
   // Read by URL, so an analysis from before the last crawl still shows.
   const pageKey = keyOfPage(page);
-  const [recommendation, features, account, knownUrlCount] = await Promise.all([
+  const [recommendation, features, account, site, queued] = await Promise.all([
     getPageRecommendation(page.projectId, pageKey),
     getPageFeatureResults(page.projectId, pageKey),
     getAccountForUser(userId),
-    // The other crawled pages are the only valid internal-link targets, so the
-    // fix plan counts them the same way the worker does.
-    prisma.page.count({
-      where: { crawlId: page.crawlId, status: "analyzed", NOT: { id: page.id } },
-    }),
+    buildSiteContext(page.projectId),
+    getCrawlPageJobs(page.projectId).catch(() => [] as string[]),
   ]);
-  const plan = planFixes(fixPlanInputFromPage(page, knownUrlCount));
+  // Link targets and image evidence counted exactly as the worker counts
+  // them, so this list and the AI Workspace never disagree.
+  const plan = planFixes(
+    fixPlanInputFromPage(page, site ? linkTargetCount(site, page.finalUrl ?? page.url) : 0, {
+      imageInput: imageInputAvailable("image-alt"),
+    }),
+  );
 
-  // An explanation written for an earlier crawl: say so, and count the
-  // problems it covered that this crawl no longer finds.
-  const failing = new Set(page.issues.map((issue) => issue.checkId));
-  const earlier =
-    recommendation?.data && isFromEarlierCrawl(recommendation, page)
-      ? {
-          at: recommendation.createdAt,
-          fixed: recommendation.data.recommendations.filter((item) => !failing.has(item.checkId)).length,
-        }
-      : null;
   const liveUrl = page.finalUrl ?? page.url;
-  const premium = account.plan !== "free";
+  const home = isHomepage(page, page.project.rootUrl);
+  const aiHere = account.limits.ai && (!account.limits.aiHomepageOnly || home);
+  // "Crawl Page" or a Priority fetch waiting for, or running on, this page.
+  const fetching = page.status === "crawling" || queued.includes(page.id);
 
-  // Free covers the homepage only. Older crawls can still hold other pages.
-  if (!premium) {
-    const homepage = findHomepage(await latestPages(page.project), page.project.rootUrl);
-    if (homepage && homepage.id !== page.id) {
+  // A plan that analyzes Priority pages only (Free: the homepage) shows those
+  // in full. Older crawls, made on a plan since lapsed, can hold more pages.
+  if (!account.limits.analyzeStandardPages) {
+    const scope = analysisScope(await latestPages(page.project), page.project.rootUrl, account.limits);
+    if (!scope.some((entry) => entry.id === page.id)) {
       return (
         <PremiumPage
           projectId={id}
-          title="More than your homepage"
-          body="Free checks your homepage. Premium checks the rest of your site and shows the exact error on every page."
+          title="Analyze more of your site"
+          body={`${account.limits.label} analyzes your homepage in full. This page is from a crawl made on another plan. Pro and Agency check every crawled page and show the exact error on each.`}
           unlocks={[
             "Every crawled page, up to your plan's page count",
             "Exact evidence and a fix for each problem",
@@ -81,6 +83,45 @@ export default async function ProjectPageDetailPage({
       );
     }
   }
+
+  // An explanation written for an earlier crawl: say so, and count the
+  // problems it covered that this crawl no longer finds.
+  const failing = new Set(page.issues.map((issue) => issue.checkId));
+  const analysis: PageAnalysis | null = recommendation?.data
+    ? {
+        summary: recommendation.data.summary,
+        confidence: recommendation.data.confidence,
+        needsHumanReview: recommendation.data.needsHumanReview,
+        groundedIn: recommendation.data.groundedIn,
+        createdAt: recommendation.createdAt.toISOString(),
+        mode: recommendation.mode,
+        knowledgeVersion: recommendation.knowledgeVersion,
+        earlier: isFromEarlierCrawl(recommendation, page)
+          ? {
+              at: recommendation.createdAt.toISOString(),
+              fixed: recommendation.data.recommendations.filter((item) => !failing.has(item.checkId)).length,
+            }
+          : null,
+      }
+    : null;
+
+  const checks = inspectPage({
+    page,
+    plan,
+    recommendation: recommendation?.data ?? null,
+    features,
+    aiAllowed: aiHere && aiConfigured(),
+  });
+
+  const facts = [
+    { label: "Requested URL", value: page.url },
+    ...(page.finalUrl && page.finalUrl !== page.url ? [{ label: "Final URL", value: page.finalUrl }] : []),
+    { label: "Status", value: page.statusCode == null ? "-" : String(page.statusCode) },
+    { label: "HTTPS", value: page.isHttps == null ? "-" : page.isHttps ? "Yes" : "No" },
+    ...(page.responseTimeMs != null ? [{ label: "Response", value: `${page.responseTimeMs} ms` }] : []),
+    ...(page.pageType ? [{ label: "Page type", value: page.pageType }] : []),
+    { label: "Crawled", value: page.createdAt.toLocaleDateString() },
+  ];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-8">
@@ -97,6 +138,7 @@ export default async function ProjectPageDetailPage({
           <div className="flex flex-wrap items-center gap-3">
             <p className="break-all font-mono text-sm text-body">{liveUrl}</p>
             <StatusBadge status={page.status} />
+            <TierBadge tier={page.crawlTier} />
             {page.pageType ? (
               <Inferred label="Type" value={page.pageType} confidence={page.pageTypeScore} />
             ) : null}
@@ -105,7 +147,7 @@ export default async function ProjectPageDetailPage({
             ) : null}
           </div>
         }
-        description={`${page.project.name}. Every check the crawler ran on this page, failing ones first.`}
+        description={`${page.project.name}. Everything the crawler checked on this page: what needs attention, the fix as code, and what already passes.`}
         actions={
           <>
             <Button asChild variant="outline" className="h-11 w-fit">
@@ -114,32 +156,52 @@ export default async function ProjectPageDetailPage({
                 <ArrowUpRight aria-hidden />
               </a>
             </Button>
-            <RecrawlButton projectId={id} maxPages={page.project.maxPages} />
+            {aiHere ? (
+              <Button asChild variant="outline" className="h-11 w-fit">
+                <Link href={`/projects/${id}/ai/pages/${page.id}`}>
+                  <Sparkles aria-hidden />
+                  AI Workspace
+                </Link>
+              </Button>
+            ) : null}
+            <CrawlPageButton projectId={id} pageId={page.id} busy={fetching} />
           </>
         }
       />
-      <PageChecks page={page} detailed={premium} />
-      <AiRecommendations
-        result={recommendation}
+      <CrawlRefresh status={fetching ? "crawling" : "idle"} intervalMs={3000} />
+      {page.crawlTier === "standard" && !page.content ? (
+        <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
+          <div className="flex max-w-2xl flex-col gap-1">
+            <p className="text-sm font-medium text-ink">
+              {fetching ? "Fetching the page" : "Standard page: its counts and links were crawled, not its text"}
+            </p>
+            <p className="text-sm leading-6 text-body">
+              {fetching
+                ? "This page updates when the fetch finishes."
+                : "Make it a Priority page to fetch its full content now. Every check then has its evidence, and AI fixes can use the text."}
+            </p>
+            {page.error && !fetching ? <p className="text-sm text-warn">{page.error}</p> : null}
+          </div>
+          {!fetching ? <PriorityFetchButton projectId={id} pageId={page.id} label="Make Priority and fetch" /> : null}
+        </section>
+      ) : page.error && !fetching ? (
+        <p role="status" className="rounded-xl bg-surface-soft px-5 py-4 text-sm leading-6 text-warn ring-1 ring-warn/30">
+          The last attempt to crawl this page did not finish: {page.error}
+        </p>
+      ) : null}
+      {aiHere ? <AiQueueStatus projectId={id} pageId={page.id} /> : null}
+      <PageInspector
         projectId={id}
         pageId={page.id}
+        pageType={page.pageType}
+        checks={checks}
+        analysis={analysis}
+        crawled={isCrawled(page)}
+        aiAllowed={aiHere}
         aiEnabled={aiConfigured()}
-        planAllowsAi={account.limits.ai}
         planLabel={account.limits.label}
-        status={<AiQueueStatus projectId={id} pageId={page.id} />}
-        earlier={earlier}
-      >
-        <PageFixes
-          projectId={id}
-          pageId={page.id}
-          pageType={page.pageType}
-          plan={plan}
-          issues={page.issues}
-          recommendation={recommendation?.data ?? null}
-          features={features}
-        />
-      </AiRecommendations>
-      {premium ? <PageEvidencePanel page={page} /> : null}
+        facts={facts}
+      />
     </div>
   );
 }

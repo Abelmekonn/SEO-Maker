@@ -147,13 +147,14 @@ describe("generateStructured retries", () => {
 
 describe("provider error classification", () => {
   const config = {
-    provider: "groq",
+    id: "groq" as const,
     model: "test-model",
     apiKey: "test-key",
     baseUrl: "https://example.invalid/v1",
     timeoutMs: 5_000,
     maxRetries: 0,
     enabled: true,
+    supportsImages: false,
   };
 
   async function callWith(status: number, body: string) {

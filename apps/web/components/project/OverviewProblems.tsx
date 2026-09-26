@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 /**
  * The problems the crawler found, on the overview.
  *
- * Free names each problem on the homepage. Premium shows every crawled page,
+ * Free names each problem on its Priority pages. Premium shows every crawled page,
  * with the exact evidence the crawler saw and the fix, which is the same
  * record the page detail screen renders.
  */
@@ -25,6 +25,22 @@ const SEVERITY_LABEL: Record<string, string> = {
 const LABEL = Object.fromEntries(checks.map((check) => [check.id, check.label]));
 
 type Finding = PageIssueRecord & { page: Page };
+
+/** A one-line summary at the top of Problems Found: a failing check and its reach, or another fact worth knowing. */
+export type ProblemInsight = {
+  key: string;
+  kind: "check" | "other";
+  title: string;
+  detail: string;
+  tone: "bad" | "warn" | "good";
+  href: string;
+};
+
+const TONE_DOT: Record<ProblemInsight["tone"], string> = {
+  bad: "bg-bad",
+  warn: "bg-warn",
+  good: "bg-good",
+};
 
 function findingsFor(pages: Page[]): Finding[] {
   return pages
@@ -41,11 +57,14 @@ export function OverviewProblems({
   pages,
   projectId,
   detailed,
+  insights = [],
 }: {
   pages: Page[];
   projectId: string;
   /** Premium: evidence, fix and every page. Free: problem names only. */
   detailed: boolean;
+  /** Key insights, shown before the problem details. */
+  insights?: ProblemInsight[];
 }) {
   const crawled = pages.filter(isCrawled);
   const findings = findingsFor(pages);
@@ -65,7 +84,7 @@ export function OverviewProblems({
             id="problems-heading"
             className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink"
           >
-            {detailed ? "Problems found" : "What is wrong on your homepage"}
+            {detailed ? "Problems found" : "What is wrong on your Priority pages"}
           </h2>
           <p className="font-mono text-[12px] text-muted-foreground">
             {crawled.length === 0
@@ -84,10 +103,41 @@ export function OverviewProblems({
         ) : null}
       </div>
 
+      {insights.length > 0 ? (
+        <div className="flex flex-col gap-3 border-b border-hairline px-5 py-4">
+          <h3 className="font-mono text-[12px] text-muted-foreground">Key insights</h3>
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+            {insights.map((insight) => (
+              <li key={insight.key}>
+                <Link
+                  href={insight.href}
+                  className="flex h-full min-h-11 items-start gap-2.5 rounded-lg bg-canvas/60 px-3 py-2.5 ring-1 ring-hairline hover:bg-surface-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span aria-hidden className={cn("mt-1.5 size-2 shrink-0 rounded-full", TONE_DOT[insight.tone])} />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate text-sm text-ink" title={insight.title}>
+                      {insight.title}
+                    </span>
+                    <span className="font-mono text-[12px] tabular-nums text-body">
+                      {insight.detail}
+                      {insight.kind === "other" ? <span className="sr-only"> (other insight)</span> : null}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {findings.length > 0 ? (
+        <h3 className="px-5 pt-4 font-mono text-[12px] text-muted-foreground">Problem details</h3>
+      ) : null}
+
       {crawled.length > 0 && findings.length === 0 ? (
         <p className="flex items-center gap-2 px-5 py-6 text-sm text-body">
           <Check className="size-4 text-good" aria-hidden />
-          {detailed ? "Every crawled page passes every check." : "Your homepage passes every check."}
+          {detailed ? "Every crawled page passes every check." : "Your Priority pages pass every check."}
         </p>
       ) : detailed ? (
         <ul className="divide-y divide-hairline">

@@ -4,7 +4,7 @@ import type { SeoDimensionId } from "@seo-maker/core/scoring";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { CompetitorConfidenceCard } from "@/components/project/CompetitorConfidenceCard";
 import { CompetitorSeoBreakdown } from "@/components/project/CompetitorSeoBreakdown";
 import { CompetitorStatusBadge } from "@/components/project/CompetitorStatusBadge";
@@ -34,7 +34,7 @@ const TABS = [
   { id: "rankings", label: "Rankings" },
   { id: "pages", label: "Pages" },
   { id: "content", label: "Content" },
-  { id: "gaps", label: "Gaps" },
+  { id: "gaps", label: "Gaps & insights" },
   { id: "compare", label: "Compare" },
 ] as const;
 
@@ -63,6 +63,7 @@ export function CompetitorDetail({
   pages,
   queries,
   summary,
+  gapsPanel,
   providerConfigured,
   lastAnalyzedAt,
 }: {
@@ -88,6 +89,8 @@ export function CompetitorDetail({
   pages: CompetitorPageRow[];
   queries: CompetitorQueryRow[];
   summary: string | null;
+  /** The comparison and its interpretation, rendered on the server (Phase 4.1). */
+  gapsPanel?: ReactNode;
   providerConfigured: boolean;
   lastAnalyzedAt: string | null;
 }) {
@@ -321,7 +324,9 @@ export function CompetitorDetail({
         </section>
       ) : null}
 
-      {tab === "gaps" ? (
+      {tab === "gaps" && gapsPanel ? gapsPanel : null}
+
+      {tab === "gaps" && !gapsPanel ? (
         <section className="rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
           <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
             Content gaps

@@ -1,22 +1,11 @@
 import type { ReactNode } from "react";
-import type { Competitor, Crawl, Page } from "@seo-maker/db";
+import type { Competitor, Page } from "@seo-maker/db";
 import Link from "next/link";
-import {
-  ArrowUpRight,
-  ChevronRight,
-  CircleAlert,
-  Gauge,
-  Lightbulb,
-  Radar,
-  Sparkles,
-  Swords,
-  TriangleAlert,
-} from "lucide-react";
+import { ArrowUpRight, ChevronRight, Sparkles, Swords } from "lucide-react";
 import { AnalyzeButton } from "@/components/project/AnalyzeButton";
 import type { PageAiResult } from "@/lib/ai-results";
 import { checks, isCrawled, toPageIssues } from "@/lib/page-audit";
 import { pagePath } from "@/lib/site-url";
-import { cn } from "@/lib/utils";
 
 /**
  * The premium overview's side panels, built only from stored data.
@@ -210,101 +199,62 @@ export function CompetitorCard({
   );
 }
 
-export function KeyInsightsCard({
-  projectId,
-  groups,
-  crawledCount,
-  crawl,
-  performance,
-}: {
-  projectId: string;
-  groups: CheckGroup[];
-  crawledCount: number;
-  crawl: Crawl | null;
-  performance: number | null;
-}) {
-  const insights: Array<{ title: string; detail: string; tone: "bad" | "warn" | "good"; href: string; icon: typeof Gauge }> = [];
+export type TopOpportunity = {
+  id: string;
+  title: string;
+  band: string;
+  score: number;
+  category: string;
+  affectedCount: number;
+};
 
-  const critical = groups.find((group) => group.severity === "critical");
-  if (critical) {
-    insights.push({
-      title: `${critical.label}: ${critical.pages.length} ${critical.pages.length === 1 ? "page" : "pages"}`,
-      detail: "Critical. Fix these before anything else.",
-      tone: "bad",
-      href: `/projects/${projectId}/pages`,
-      icon: CircleAlert,
-    });
-  }
+const BAND_STYLE: Record<string, string> = {
+  critical: "text-bad",
+  high: "text-warn",
+  medium: "text-primary",
+  low: "text-muted-foreground",
+};
 
-  const widest = [...groups].sort((a, b) => b.pages.length - a.pages.length)[0];
-  if (widest && widest !== critical && crawledCount > 0) {
-    insights.push({
-      title: `${widest.label} fails on ${Math.round((widest.pages.length / crawledCount) * 100)}% of pages`,
-      detail: `${widest.pages.length} of ${crawledCount} crawled pages. One template fix may cover most of them.`,
-      tone: "warn",
-      href: `/projects/${projectId}/pages`,
-      icon: TriangleAlert,
-    });
-  }
-
-  insights.push(
-    performance == null
-      ? {
-          title: "PageSpeed has not run yet",
-          detail: "Run Lighthouse to measure load speed and Core Web Vitals.",
-          tone: "warn",
-          href: `/projects/${projectId}/performance`,
-          icon: Gauge,
-        }
-      : {
-          title: `Mobile performance ${Math.round(performance)}/100`,
-          detail: performance >= 90 ? "Fast on mobile." : "Below 90. See which audits cost the most.",
-          tone: performance >= 90 ? "good" : performance >= 50 ? "warn" : "bad",
-          href: `/projects/${projectId}/performance`,
-          icon: Gauge,
-        },
-  );
-
-  const uncrawled = crawl ? Math.max(0, crawl.discovered - crawl.analyzed) : 0;
-  if (uncrawled > 0) {
-    insights.push({
-      title: `${uncrawled.toLocaleString()} URLs not crawled yet`,
-      detail: `Found in the sitemap but past this crawl's ${crawl?.maxPages ?? ""} page limit.`,
-      tone: "warn",
-      href: `/projects/${projectId}/pages`,
-      icon: Radar,
-    });
-  }
-
+/**
+ * The site's top opportunities (Phase 3.8), ranked by the deterministic
+ * priority engine across every check, the link graph, performance and
+ * content coverage, rather than by one check at a time.
+ */
+export function TopOpportunities({ projectId, rows }: { projectId: string; rows: TopOpportunity[] }) {
   return (
-    <Panel title="Key insights" icon={<Lightbulb className="size-4 text-body" aria-hidden />}>
-      <ul className="flex flex-col">
-        {insights.slice(0, 4).map((item) => (
-          <li key={item.title}>
+    <section aria-labelledby="next-actions">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 id="next-actions" className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
+          Next best actions
+        </h2>
+        <Link
+          href={`/projects/${projectId}/opportunities`}
+          className="inline-flex min-h-11 items-center gap-1 font-mono text-[12px] text-body hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          All opportunities
+          <ChevronRight className="size-3.5" aria-hidden />
+        </Link>
+      </div>
+      <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {rows.map((row, index) => (
+          <li key={row.id}>
             <Link
-              href={item.href}
-              className="flex min-h-11 items-center gap-3 border-t border-hairline py-2.5 first:border-t-0 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              href={`/projects/${projectId}/opportunities`}
+              className="flex h-full min-h-11 items-start gap-3 rounded-xl bg-surface-soft px-4 py-3 ring-1 ring-hairline hover:bg-surface-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span
-                className={cn(
-                  "flex size-8 shrink-0 items-center justify-center rounded-full",
-                  item.tone === "bad" && "bg-bad/15 text-bad",
-                  item.tone === "warn" && "bg-warn/15 text-warn",
-                  item.tone === "good" && "bg-good/15 text-good",
-                )}
-              >
-                <item.icon className="size-3.5" aria-hidden />
+              <span className="mt-0.5 font-mono text-[12px] text-muted-foreground">{index + 1}</span>
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-sm text-ink">{row.title}</span>
+                <span className="font-mono text-[12px] text-muted-foreground">
+                  <span className={BAND_STYLE[row.band] ?? BAND_STYLE.low}>{row.band}</span> · {Math.round(row.score)}
+                  {row.affectedCount ? ` · ${row.affectedCount} ${row.affectedCount === 1 ? "page" : "pages"}` : ""}
+                </span>
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm leading-5 text-ink">{item.title}</span>
-                <span className="block text-xs leading-5 text-body">{item.detail}</span>
-              </span>
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             </Link>
           </li>
         ))}
-      </ul>
-    </Panel>
+      </ol>
+    </section>
   );
 }
 

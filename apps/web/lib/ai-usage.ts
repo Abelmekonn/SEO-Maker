@@ -87,3 +87,48 @@ export async function getAiUsage(): Promise<AiUsage> {
     pagesLeftToday: Math.floor(remaining / tokensPerPage),
   };
 }
+
+export type FeatureSpend = {
+  feature: string;
+  /** Answers the provider generated. */
+  calls: number;
+  /** Answers reused from the cache: stored as zero-token copies. */
+  cached: number;
+  failed: number;
+  tokens: number;
+  cost: number;
+  models: string[];
+};
+
+/**
+ * AI spend per feature for one project (Phase 4.5).
+ *
+ * A cache hit is stored as a zero-token copy of an earlier answer, so the
+ * cached share here is what caching actually saved, not an estimate. Models
+ * are listed per feature because routing can send simple and complex
+ * features to different ones.
+ */
+export async function getFeatureSpend(projectId: string, days = 7): Promise<FeatureSpend[]> {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const rows = await prisma.aiResult.findMany({
+    where: { projectId, createdAt: { gte: since } },
+    select: { feature: true, status: true, model: true, inputTokens: true, outputTokens: true, estimatedCost: true },
+    take: 5000,
+  });
+  const byFeature = new Map<string, FeatureSpend & { modelSet: Set<string> }>();
+  for (const row of rows) {
+    const entry =
+      byFeature.get(row.feature) ??
+      { feature: row.feature, calls: 0, cached: 0, failed: 0, tokens: 0, cost: 0, models: [], modelSet: new Set<string>() };
+    if (row.status !== "ok") entry.failed += 1;
+    else if (row.inputTokens === 0) entry.cached += 1;
+    else entry.calls += 1;
+    entry.tokens += (row.inputTokens ?? 0) + (row.outputTokens ?? 0);
+    entry.cost += row.estimatedCost ?? 0;
+    entry.modelSet.add(row.model);
+    byFeature.set(row.feature, entry);
+  }
+  return [...byFeature.values()]
+    .map(({ modelSet, ...entry }) => ({ ...entry, cost: Math.round(entry.cost * 10_000) / 10_000, models: [...modelSet] }))
+    .sort((a, b) => b.tokens - a.tokens);
+}

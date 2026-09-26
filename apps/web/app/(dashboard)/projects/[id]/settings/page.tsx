@@ -42,8 +42,8 @@ export default async function ProjectSettingsPage({
           title="Business context"
           description={
             project.analysisMode === "deep"
-              ? `Deep analysis is on. Context is ${completeness}% complete — the more you fill in, the more specific the recommendations can be.`
-              : "This project runs in Quick mode from the URL alone. Add context here to switch it to Deep analysis."
+              ? `AI uses your business context. It is ${completeness}% complete: the more you fill in, the more specific the recommendations can be.`
+              : "AI works from the crawl alone for this site. Add context here to make its recommendations specific to your business."
           }
         />
         <BusinessContextForm projectId={project.id} initial={context} />

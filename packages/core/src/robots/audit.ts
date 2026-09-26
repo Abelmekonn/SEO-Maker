@@ -1,3 +1,4 @@
+import type { RobotsOutcome, RobotsProblem, RobotsRedirect } from "./fetch";
 import { type ParsedRobots, type RobotsGroup, groupFor, isPathDisallowed } from "./parse";
 
 /**
@@ -26,6 +27,17 @@ export type RobotsAudit = {
   blockedSitemapUrls: string[];
   /** True when the whole site is closed to our crawler. */
   blocksEverything: boolean;
+
+  // How the file was fetched. Optional: audits stored before these existed lack them.
+  /** Where the file actually came from, after redirects. */
+  finalUrl?: string | null;
+  redirects?: RobotsRedirect[];
+  /** ok | unavailable (no rules apply) | unreachable (RFC 9309: treat all as disallowed). */
+  outcome?: RobotsOutcome;
+  problem?: RobotsProblem | null;
+  truncated?: boolean;
+  /** What went wrong, in words. */
+  error?: string | null;
 };
 
 export type RobotsAuditInput = {
@@ -35,13 +47,33 @@ export type RobotsAuditInput = {
   group: RobotsGroup | null;
   /** Normalized URLs read from the sitemap, checked against the rules. */
   sitemapUrls?: string[];
+  /** The fetch that produced `parsed`, from fetchRobotsTxt. */
+  fetch?: {
+    finalUrl: string | null;
+    redirects: RobotsRedirect[];
+    outcome: RobotsOutcome;
+    problem: RobotsProblem | null;
+    truncated: boolean;
+    error: string | null;
+  };
 };
 
 export function buildRobotsAudit(input: RobotsAuditInput): RobotsAudit {
   const { url, status, parsed, group } = input;
+  const fetched = input.fetch
+    ? {
+        finalUrl: input.fetch.finalUrl,
+        redirects: input.fetch.redirects,
+        outcome: input.fetch.outcome,
+        problem: input.fetch.problem,
+        truncated: input.fetch.truncated,
+        error: input.fetch.error,
+      }
+    : {};
 
   if (!parsed) {
     return {
+      ...fetched,
       url,
       found: false,
       status,
@@ -71,6 +103,7 @@ export function buildRobotsAudit(input: RobotsAuditInput): RobotsAudit {
   }
 
   return {
+    ...fetched,
     url,
     found: true,
     status,

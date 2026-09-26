@@ -13,7 +13,9 @@ const require = createRequire(import.meta.url);
 const tsxCli = require.resolve("tsx/cli");
 const entry = process.argv[2] ?? "src/index.ts";
 
-const child = spawn(process.execPath, [tsxCli, "watch", "--env-file=.env", entry], {
+// The repo-root .env first (shared settings such as the AI provider keys),
+// then this app's own .env, whose values win.
+const child = spawn(process.execPath, [tsxCli, "watch", "--env-file-if-exists=../../.env", "--env-file-if-exists=.env", entry], {
   stdio: ["ignore", "inherit", "inherit"],
 });
 

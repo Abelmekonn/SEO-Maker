@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
+import { refundUsage } from "@/lib/crawl-access";
 import { removeProjectJobs } from "@/lib/queue";
 
 export async function GET(
@@ -43,8 +44,11 @@ export async function DELETE(
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
-  const removedJobs = await removeProjectJobs(project.id).catch(() => 0);
+  const removed = await removeProjectJobs(project.id).catch(() => ({ removed: 0, usageIds: [] as string[] }));
+  // Work that never ran is never charged. Crawls that did run stay counted:
+  // deleting a site does not give its crawls back.
+  await refundUsage(removed.usageIds, "site deleted before it ran", "cancelled");
   await prisma.project.delete({ where: { id: project.id } });
 
-  return NextResponse.json({ ok: true, removedJobs });
+  return NextResponse.json({ ok: true, removedJobs: removed.removed });
 }

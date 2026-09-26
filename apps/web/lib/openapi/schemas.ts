@@ -109,7 +109,7 @@ export const ProjectDetail = registry.register(
   "ProjectDetail",
   projectShape.extend({
     pages: z.array(Page).openapi({
-      description: "Pages from the project's latest crawl (or the pending seed row before the first crawl finishes).",
+      description: "Pages from the project's latest crawl. Empty before the first crawl.",
     }),
   }),
 );
@@ -176,10 +176,111 @@ export const ContextResponse = registry.register(
   }),
 );
 
-/** POST /api/projects/:id/crawl — no request body; response varies by outcome. */
+/** POST /api/projects/:id/crawl — see apps/web/app/api/projects/[id]/crawl/route.ts */
+export const CrawlRequest = z
+  .object({
+    pages: z
+      .array(z.string())
+      .optional()
+      .openapi({
+        description:
+          "Page keys from the site's page inventory to fetch. Omit to crawl its Priority pages, which is what " +
+          "a new site's first crawl does. No more than the plan's page count per crawl.",
+      }),
+    scope: z.enum(["recrawl", "new-pages"]).optional().openapi({
+      description: "new-pages: the pages a check for new pages just found. Informational; nothing is re-classified either way.",
+    }),
+  })
+  .openapi("CrawlRequest");
+
 export const CrawlQueuedResponse = registry.register(
   "CrawlQueuedResponse",
   z.object({ ok: z.literal(true), maxPages: z.number().int() }),
+);
+
+export const CrawlTier = z.enum(["priority", "standard"]).openapi("CrawlTier", {
+  description:
+    "Priority Crawl keeps the full page evidence (text, headings, links, images, structured data). " +
+    "Standard Crawl still fetches the page but keeps only what the site inventory and the basic checks need. " +
+    "Crawling strategies, not analysis modes: Quick and Deep are unrelated.",
+});
+
+/** GET/PATCH /api/projects/:id/inventory — see apps/web/lib/site-inventory.ts */
+export const InventoryPage = registry.register(
+  "InventoryPage",
+  z.object({
+    pageKey: z.string().openapi({ description: "URL identity, stable across crawls. Names the page in other requests." }),
+    url: z.string(),
+    path: z.string(),
+    homepage: z.boolean(),
+    tier: CrawlTier.openapi({ description: "Stored when discovery found the page; a crawl never changes it." }),
+    tierSource: z.enum(["auto", "user"]),
+    pageType: z.string().nullable(),
+    level: z.enum(["high", "medium", "low", "utility"]).openapi({
+      description: "Importance within the site, from discovery evidence. An internal ordering, not a search ranking.",
+    }),
+    discoveredAt: z.string().datetime(),
+    lastCrawledAt: z.string().datetime().nullable(),
+  }),
+);
+
+export const InventoryResponse = registry.register(
+  "InventoryResponse",
+  z.object({ priorityLimit: z.number().int(), pages: z.array(InventoryPage) }),
+);
+
+export const UpdateInventoryRequest = z
+  .object({ pageKey: z.string(), tier: CrawlTier })
+  .openapi("UpdateInventoryRequest");
+
+/** GET/POST /api/projects/:id/discover */
+export const DiscoveryRequest = z
+  .object({
+    mode: z.enum(["new-pages", "initial"]).openapi({
+      description: "new-pages: find pages not known yet. initial: retry a new site's first discovery after it failed.",
+    }),
+  })
+  .openapi("DiscoveryRequest");
+
+export const DiscoveryStateResponse = registry.register(
+  "DiscoveryState",
+  z.object({
+    status: z.enum(["idle", "queued", "running", "done", "failed"]),
+    mode: z.enum(["initial", "new-pages"]).nullable(),
+    error: z.string().nullable(),
+    at: z.string().datetime().nullable(),
+    result: z
+      .object({
+        mode: z.enum(["initial", "new-pages"]),
+        at: z.string().datetime(),
+        total: z.number().int().openapi({ description: "Pages in the inventory afterwards." }),
+        priority: z.number().int(),
+        standard: z.number().int(),
+        added: z
+          .array(
+            z.object({
+              url: z.string(),
+              pageKey: z.string(),
+              path: z.string(),
+              tier: CrawlTier,
+              pageType: z.string(),
+              level: z.enum(["high", "medium", "low", "utility"]),
+            }),
+          )
+          .openapi({ description: "new-pages: the pages this check added, not crawled." }),
+        addedNotListed: z.number().int(),
+        sitemapUrls: z.number().int(),
+        robotsFound: z.boolean(),
+        homepageError: z.string().nullable(),
+      })
+      .nullable(),
+    workerOnline: z.boolean(),
+  }),
+);
+
+export const QueuedResponse = registry.register(
+  "QueuedResponse",
+  z.object({ ok: z.literal(true), queued: z.boolean(), message: z.string().optional() }),
 );
 
 /** POST /api/projects/:id/performance — see apps/web/app/api/projects/[id]/performance/route.ts */
@@ -191,9 +292,8 @@ export const RunPerformanceRequest = registry.register(
       .optional()
       .openapi({
         description:
-          "Which pages to run PageSpeed on. Omit to use the plan default (homepage only on Free; " +
-          "shallowest pages up to the plan limit on Pro/Agency). Free always resolves to the homepage " +
-          "regardless of what is sent here.",
+          "Which pages to run PageSpeed on. Omit to use the plan default (the shallowest pages up to " +
+          "the plan limit). Not available on Free.",
       }),
   }),
 );
@@ -257,3 +357,71 @@ export const HardDeleteQuery = z.object({
       description: "Pass hard=1 to permanently delete the row instead of soft-excluding it.",
     }),
 });
+
+// --- Site opportunities (Phase 3) and competitor insight (Phase 4) ---------
+
+/** Mirrors `OpportunityView` in apps/web/lib/opportunities.ts. */
+export const Opportunity = registry.register(
+  "Opportunity",
+  z.object({
+    id: z.string(),
+    key: z.string().openapi({ description: 'Stable across crawls, e.g. "check:meta" or "links:orphans".' }),
+    source: z.enum(["site", "competitor"]),
+    category: z
+      .string()
+      .openapi({ description: "technical | onpage | content | internal-links | structured-data | performance" }),
+    title: z.string(),
+    rationale: z.string().nullable(),
+    action: z.string().nullable(),
+    nextStep: z.string().nullable(),
+    score: z.number().openapi({ description: "0-100, computed by code from crawl evidence. Never set by AI." }),
+    band: z.enum(["critical", "high", "medium", "low"]),
+    effort: z.string().nullable(),
+    confidence: z.number().nullable(),
+    facts: z.array(z.string()).openapi({ description: "Verifiable statements from the crawl." }),
+    statement: z.string().nullable(),
+    affected: z.array(
+      z.object({ key: z.string(), url: z.string(), path: z.string(), pageId: z.string().nullable() }),
+    ),
+    affectedCount: z.number().int(),
+    baselineCount: z.number().int().nullable(),
+    outcome: z.enum(["new", "resolved", "improved", "unchanged", "worse"]),
+    status: z.enum(["open", "in-progress", "done", "dismissed"]),
+    aiUsed: z.boolean(),
+    resolvedAt: z.string().nullable(),
+    updatedAt: z.string(),
+    competitor: z.object({ id: z.string(), domain: z.string() }).nullable(),
+    parts: z.array(z.object({ label: z.string(), points: z.number() })),
+  }),
+);
+
+export const RefreshOpportunitiesRequest = z
+  .object({
+    explain: z.boolean().optional().openapi({ description: "Also queue the AI job that writes the wording." }),
+    force: z.boolean().optional().openapi({ description: "Regenerate the wording even when a cached answer fits." }),
+  })
+  .openapi("RefreshOpportunitiesRequest");
+
+export const RefreshOpportunitiesResponse = z
+  .object({
+    ok: z.literal(true),
+    opportunities: z.number().int(),
+    created: z.number().int(),
+    resolved: z.number().int(),
+    queued: z.boolean(),
+    message: z.string().optional(),
+  })
+  .openapi("RefreshOpportunitiesResponse");
+
+export const UpdateOpportunityRequest = z
+  .object({ status: z.enum(["open", "in-progress", "done", "dismissed"]) })
+  .openapi("UpdateOpportunityRequest");
+
+export const OpportunityIdParams = z.object({
+  id: z.string().openapi({ param: { name: "id", in: "path" }, example: "cm0abc123" }),
+  opportunityId: z.string().openapi({ param: { name: "opportunityId", in: "path" }, example: "cm0opp456" }),
+});
+
+export const QueueResponse = z
+  .object({ ok: z.literal(true), queued: z.boolean(), message: z.string().optional() })
+  .openapi("QueueResponse");

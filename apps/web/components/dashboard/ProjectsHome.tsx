@@ -13,13 +13,16 @@ import {
   Plus,
   Radar,
   Wrench,
+  Zap,
 } from "lucide-react";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { DeleteProjectButton } from "@/components/project/DeleteProjectButton";
 import { GoPremiumButton } from "@/components/project/PremiumGate";
+import { SearchTrigger } from "@/components/layout/SearchTrigger";
+import type { QuotaView } from "@/lib/ai-access";
 import { StatusBadge } from "@/components/project/StatusBadge";
 import { checks, failedChecks, isCrawled, siteSeoScore } from "@/lib/page-audit";
-import type { PlanId } from "@/lib/plan";
+import type { PlanId, PlanLimits } from "@/lib/plan";
 import { scoreRating } from "@/lib/performance";
 import { cn } from "@/lib/utils";
 
@@ -46,10 +49,13 @@ export function ProjectsHome({
   planLabel,
   maxProjects,
   maxPages,
-  canUseDeep,
   projects,
   crawls,
+  limits,
+  quota,
 }: {
+  limits: PlanLimits;
+  quota: QuotaView;
   firstName: string | null;
   plan: PlanId;
   planLabel: string;
@@ -61,7 +67,7 @@ export function ProjectsHome({
 }) {
   const premium = plan !== "free";
   const sites = projects.map(toSite);
-  const live = sites.find((site) => site.status === "pending" || site.status === "crawling");
+  const live = sites.find((site) => site.status === "pending" || site.status === "crawling" || site.status === "discovering");
   const atLimit = sites.length >= maxProjects;
 
   const pagesAudited = sites.reduce((sum, site) => sum + site.crawled, 0);
@@ -101,18 +107,29 @@ export function ProjectsHome({
             Every site you audit, every crawl you have run, and what your plan covers.
           </p>
         </div>
-        {atLimit && !premium ? (
-          <GoPremiumButton label="Add more websites" />
-        ) : (
+        <div className="flex flex-wrap items-center gap-3">
           <Link
-            href="/projects/new"
-            className="inline-flex h-11 items-center gap-2 rounded-md bg-primary px-4 font-mono text-sm text-primary-foreground transition-colors hover:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            href="/quick-search"
+            className="inline-flex h-11 items-center gap-2 rounded-md px-4 font-mono text-sm text-ink ring-1 ring-hairline transition-colors hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Plus className="size-4" aria-hidden />
-            Add a website
+            <Zap className="size-4" aria-hidden />
+            Quick Search
           </Link>
-        )}
+          {atLimit && !premium ? (
+            <GoPremiumButton label="Add more websites" />
+          ) : (
+            <Link
+              href="/projects/new"
+              className="inline-flex h-11 items-center gap-2 rounded-md bg-primary px-4 font-mono text-sm text-primary-foreground transition-colors hover:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Plus className="size-4" aria-hidden />
+              Add a website
+            </Link>
+          )}
+        </div>
       </header>
+
+      <SearchTrigger className="max-w-xl" />
 
       <section aria-label="Workspace totals" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Kpi
@@ -127,7 +144,7 @@ export function ProjectsHome({
           icon={FileSearch}
           label="Pages audited"
           value={pagesAudited.toLocaleString()}
-          hint={premium ? `Up to ${maxPages} per site` : "Homepage of each site"}
+          hint={maxPages === 1 ? "Your homepage, fully analyzed" : `Up to ${maxPages} per site`}
         />
         <Kpi
           icon={CircleAlert}
@@ -296,8 +313,8 @@ export function ProjectsHome({
             planLabel={planLabel}
             used={sites.length}
             maxProjects={maxProjects}
-            maxPages={maxPages}
-            canUseDeep={canUseDeep}
+            limits={limits}
+            quota={quota}
           />
 
           <Card title="Most common problems" icon={Radar}>
@@ -388,23 +405,29 @@ function PlanCard({
   planLabel,
   used,
   maxProjects,
-  maxPages,
-  canUseDeep,
+  limits,
+  quota,
 }: {
   premium: boolean;
   planLabel: string;
   used: number;
   maxProjects: number;
-  maxPages: number;
-  canUseDeep: boolean;
+  limits: PlanLimits;
+  quota: QuotaView;
 }) {
   const features = [
-    { label: maxPages === 1 ? "Homepage audit" : `Up to ${maxPages} pages per crawl`, on: true },
-    { label: "Exact errors and fixes", on: premium },
-    { label: "Competitor analysis", on: premium },
-    { label: "AI suggestions", on: premium },
-    { label: "Deep business context", on: canUseDeep },
+    { label: limits.maxPages === 1 ? "Homepage Deep Analysis" : `Up to ${limits.maxPages} pages per crawl`, on: true },
+    { label: "Quick Search", on: true },
+    { label: limits.maxPages === 1 ? "Homepage performance" : "Performance", on: limits.performance },
+    { label: limits.aiHomepageOnly ? "Page AI on your homepage" : "Page AI on every page", on: limits.ai },
+    { label: "Site AI", on: limits.siteAi },
+    { label: "Competitor AI", on: limits.competitorAi },
+    {
+      label: limits.recrawlsPerSite == null ? "Unlimited re-crawls" : `${limits.recrawlsPerSite} re-crawl per site`,
+      on: true,
+    },
   ];
+  const ai = quota.daily.limit != null && quota.weekly.limit != null ? quota : null;
   const pct = maxProjects > 0 ? Math.min(100, (used / maxProjects) * 100) : 0;
 
   return (
@@ -462,6 +485,24 @@ function PlanCard({
           </li>
         ))}
       </ul>
+
+      {ai ? (
+        <div className="flex flex-col gap-1.5 rounded-lg bg-canvas/60 p-3 ring-1 ring-hairline">
+          <p className="font-mono text-[12px] text-muted-foreground">AI recommendations left</p>
+          <p className="flex items-baseline justify-between font-mono text-[12px]">
+            <span className="text-body">Today</span>
+            <span className="tabular-nums text-ink">
+              {ai.daily.remaining} of {ai.daily.limit}
+            </span>
+          </p>
+          <p className="flex items-baseline justify-between font-mono text-[12px]">
+            <span className="text-body">This week</span>
+            <span className="tabular-nums text-ink">
+              {ai.weekly.remaining} of {ai.weekly.limit}
+            </span>
+          </p>
+        </div>
+      ) : null}
 
       {premium ? null : <GoPremiumButton className="w-full" />}
     </section>

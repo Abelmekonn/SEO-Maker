@@ -1,19 +1,29 @@
 import {
+  AI_COMPETITOR_INSIGHT_JOB,
+  AI_COMPETITOR_QUEUE,
   AI_PAGE_ANALYZE_JOB,
   AI_PAGE_QUEUE,
+  AI_SITE_ANALYZE_JOB,
+  AI_SITE_QUEUE,
   COMPETITOR_ANALYZE_ONE_JOB,
   COMPETITOR_DISCOVER_JOB,
   COMPETITOR_INSIGHTS_JOB,
   COMPETITOR_QUEUE,
   CRAWL_HOMEPAGE_JOB,
+  CRAWL_PAGE_JOB,
   CRAWL_QUEUE,
+  DISCOVER_SITE_JOB,
   RUN_PERFORMANCE_JOB,
   aiStopKey,
+  type AiCompetitorInsightJob,
   type AiPageAnalyzeJob,
+  type AiSiteAnalyzeJob,
   type CompetitorAnalyzeOneJob,
   type CompetitorDiscoverJob,
   type CompetitorInsightsJob,
   type CrawlHomepageJob,
+  type CrawlPageJob,
+  type DiscoverSiteJob,
   type PerfPageTarget,
   type RunPerformanceJob,
 } from "@seo-maker/core/queue";
@@ -41,7 +51,7 @@ export type {
   RunPerformanceJob,
 };
 
-type CrawlQueueJob = CrawlHomepageJob | RunPerformanceJob;
+type CrawlQueueJob = CrawlHomepageJob | RunPerformanceJob | CrawlPageJob | DiscoverSiteJob;
 type CompetitorQueueJob = CompetitorDiscoverJob | CompetitorAnalyzeOneJob | CompetitorInsightsJob;
 
 const JOB_OPTIONS = { attempts: 2, removeOnComplete: 50, removeOnFail: 50 } as const;
@@ -82,6 +92,37 @@ function getCompetitorQueue() {
 
 export async function enqueueHomepageCrawl(data: CrawlHomepageJob) {
   await getCrawlQueue().add(CRAWL_HOMEPAGE_JOB, data, JOB_OPTIONS);
+}
+
+/**
+ * Finds a site's pages and classifies them, without crawling them. Not
+ * retried by BullMQ: a failure is recorded on the project and the user tries
+ * again from the screen.
+ */
+export async function enqueueDiscovery(data: DiscoverSiteJob) {
+  await getCrawlQueue().add(DISCOVER_SITE_JOB, data, { attempts: 1, removeOnComplete: 50, removeOnFail: 50 });
+}
+
+/**
+ * One page fetched into the latest crawl: a Priority fetch, or "Crawl page".
+ * Deduplicated by page: a second press while one waits reuses it. Not
+ * retried by BullMQ; the user can press again.
+ */
+export async function enqueueCrawlPage(data: CrawlPageJob) {
+  await getCrawlQueue().add(CRAWL_PAGE_JOB, data, {
+    jobId: `crawl-page-${data.pageId}`,
+    attempts: 1,
+    removeOnComplete: true,
+    removeOnFail: true,
+  });
+}
+
+/** Page ids with a Priority fetch waiting or running for this project. */
+export async function getCrawlPageJobs(projectId: string): Promise<string[]> {
+  const jobs = await getCrawlQueue().getJobs(["active", "waiting", "prioritized", "delayed"], 0, 500);
+  return jobs
+    .filter((job) => job?.name === CRAWL_PAGE_JOB && job.data?.projectId === projectId)
+    .map((job) => (job.data as CrawlPageJob).pageId);
 }
 
 export async function enqueuePerformanceAudit(data: RunPerformanceJob) {
@@ -133,6 +174,63 @@ export async function enqueueAiPageAnalysis(data: AiPageAnalyzeJob) {
     removeOnComplete: 100,
     removeOnFail: 100,
   });
+}
+
+let aiSiteQueue: Queue<AiSiteAnalyzeJob> | null = null;
+
+function getAiSiteQueue() {
+  if (!aiSiteQueue) {
+    aiSiteQueue = new Queue<AiSiteAnalyzeJob>(AI_SITE_QUEUE, { connection: getConnection() });
+  }
+  return aiSiteQueue;
+}
+
+let aiCompetitorQueue: Queue<AiCompetitorInsightJob> | null = null;
+
+function getAiCompetitorQueue() {
+  if (!aiCompetitorQueue) {
+    aiCompetitorQueue = new Queue<AiCompetitorInsightJob>(AI_COMPETITOR_QUEUE, { connection: getConnection() });
+  }
+  return aiCompetitorQueue;
+}
+
+/**
+ * Queues site-level AI wording for the project's opportunities (Phase 3.3).
+ * `attempts: 1` for the same reason as page analysis: the AI layer retries
+ * provider failures itself and records the outcome.
+ */
+export async function enqueueAiSiteAnalysis(data: AiSiteAnalyzeJob) {
+  await getAiSiteQueue().add(AI_SITE_ANALYZE_JOB, data, { attempts: 1, removeOnComplete: 50, removeOnFail: 50 });
+}
+
+/** Queues competitor interpretation (Phase 4.1), one competitor or all. */
+export async function enqueueAiCompetitorInsight(data: AiCompetitorInsightJob) {
+  await getAiCompetitorQueue().add(AI_COMPETITOR_INSIGHT_JOB, data, { attempts: 1, removeOnComplete: 50, removeOnFail: 50 });
+}
+
+export type ProjectJob<T> = { jobId: string; state: "active" | "waiting"; queuedAt: number; data: T };
+
+async function projectJobs<T extends { projectId: string }>(queue: Queue<T>, projectId: string): Promise<ProjectJob<T>[]> {
+  const [active, waiting] = await Promise.all([
+    queue.getJobs(["active"]),
+    queue.getJobs(["waiting", "prioritized", "delayed"], 0, 999, true),
+  ]);
+  return [
+    ...active.map((job) => ({ job, state: "active" as const })),
+    ...waiting.map((job) => ({ job, state: "waiting" as const })),
+  ]
+    .filter(({ job }) => job?.data?.projectId === projectId)
+    .map(({ job, state }) => ({ jobId: String(job.id), state, queuedAt: job.timestamp, data: job.data as T }));
+}
+
+/** This project's site-level AI jobs that have not finished. */
+export function getAiSiteJobs(projectId: string) {
+  return projectJobs(getAiSiteQueue(), projectId);
+}
+
+/** This project's competitor AI jobs that have not finished. */
+export function getAiCompetitorJobs(projectId: string) {
+  return projectJobs(getAiCompetitorQueue(), projectId);
 }
 
 export async function enqueueCompetitorInsights(data: CompetitorInsightsJob) {
@@ -209,7 +307,10 @@ export async function getCrawlQueueState(projectId: string): Promise<{
     queue.getWorkersCount(),
     queue.getJobs(["waiting", "prioritized", "delayed"], 0, 200, true),
   ]);
-  const index = waiting.findIndex((job) => job?.data && "projectId" in job.data && job.data.projectId === projectId);
+  // Crawls only: a discovery or one page waiting for this site is not its crawl.
+  const index = waiting.findIndex(
+    (job) => job?.name === CRAWL_HOMEPAGE_JOB && job.data && "projectId" in job.data && job.data.projectId === projectId,
+  );
   return { workerOnline: workers > 0, waitingPosition: index === -1 ? null : index + 1 };
 }
 
@@ -217,15 +318,30 @@ const NOT_STARTED = ["waiting", "prioritized", "delayed", "paused"] as const;
 
 /** Removes jobs that have not started yet and match, from one queue. */
 async function removeWaiting<T>(queue: Queue<T>, match: (name: string, data: T) => boolean): Promise<number> {
+  return (await removeWaitingJobs(queue, match)).length;
+}
+
+/** The same, returning what was removed, so charges for them can be given back. */
+async function removeWaitingJobs<T>(queue: Queue<T>, match: (name: string, data: T) => boolean): Promise<T[]> {
   const jobs = await queue.getJobs([...NOT_STARTED], 0, 999);
-  let removed = 0;
+  const removed: T[] = [];
   for (const job of jobs) {
     if (job?.data && match(job.name, job.data)) {
       await job.remove().catch(() => undefined);
-      removed += 1;
+      removed.push(job.data);
     }
   }
   return removed;
+}
+
+/** Usage records of the AI jobs removed from the queue by a stop or a delete. */
+async function removeWaitingWithUsage<T>(queue: Queue<T>, match: (name: string, data: T) => boolean): Promise<{ removed: number; usageIds: string[] }> {
+  const jobs = await removeWaitingJobs(queue, match);
+  const usageIds = jobs.flatMap((data) => {
+    const usageId = (data as { usageId?: unknown }).usageId;
+    return typeof usageId === "string" ? [usageId] : [];
+  });
+  return { removed: jobs.length, usageIds };
 }
 
 function forProject(projectId: string) {
@@ -238,19 +354,28 @@ function forProject(projectId: string) {
  * deleted site is not crawled or analysed afterwards. A job already running
  * finds its project gone and stops on its own.
  */
-export async function removeProjectJobs(projectId: string): Promise<number> {
-  const queues = [getCrawlQueue(), getCompetitorQueue(), getAiPageQueue()] as Queue<unknown>[];
+export async function removeProjectJobs(projectId: string): Promise<{ removed: number; usageIds: string[] }> {
+  const queues = [
+    getCrawlQueue(),
+    getCompetitorQueue(),
+    getAiPageQueue(),
+    getAiSiteQueue(),
+    getAiCompetitorQueue(),
+  ] as Queue<unknown>[];
   let removed = 0;
+  const usageIds: string[] = [];
   for (const queue of queues) {
-    removed += await removeWaiting(queue, forProject(projectId));
+    const result = await removeWaitingWithUsage(queue, forProject(projectId));
+    removed += result.removed;
+    usageIds.push(...result.usageIds);
   }
-  return removed;
+  return { removed, usageIds };
 }
 
-/** Takes a queued crawl that has not started off the queue. */
-export async function removeQueuedCrawl(projectId: string): Promise<number> {
+/** Takes a queued crawl that has not started off the queue, with the usage records it held. */
+export async function removeQueuedCrawl(projectId: string): Promise<{ removed: number; usageIds: string[] }> {
   const mine = forProject(projectId);
-  return removeWaiting(getCrawlQueue(), (name, data) => name === CRAWL_HOMEPAGE_JOB && mine(name, data));
+  return removeWaitingWithUsage(getCrawlQueue(), (name, data) => name === CRAWL_HOMEPAGE_JOB && mine(name, data));
 }
 
 /** Takes a queued PageSpeed run that has not started off the queue. */
@@ -276,11 +401,20 @@ export async function performanceJobActive(projectId: string): Promise<boolean> 
  * page being analysed stops at its next check (the worker polls the stop key).
  * Work queued after this call is unaffected.
  */
-export async function stopAiWork(projectId: string): Promise<{ removed: number; running: number }> {
+export async function stopAiWork(projectId: string): Promise<{ removed: number; running: number; usageIds: string[] }> {
   const connection = getConnection();
   // An hour outlives any job queued before the stop.
   await connection.set(aiStopKey(projectId), String(Date.now()), "EX", 3600);
-  const removed = await removeWaiting(getAiPageQueue(), forProject(projectId));
-  const running = (await getAiPageQueue().getJobs(["active"])).filter((job) => job?.data?.projectId === projectId).length;
-  return { removed, running };
+  // Page, site and competitor AI all read the same stop key.
+  const queues = [getAiPageQueue(), getAiSiteQueue(), getAiCompetitorQueue()] as unknown as Queue<{ projectId: string }>[];
+  let removed = 0;
+  let running = 0;
+  const usageIds: string[] = [];
+  for (const queue of queues) {
+    const result = await removeWaitingWithUsage(queue, forProject(projectId));
+    removed += result.removed;
+    usageIds.push(...result.usageIds);
+    running += (await queue.getJobs(["active"])).filter((job) => job?.data?.projectId === projectId).length;
+  }
+  return { removed, running, usageIds };
 }

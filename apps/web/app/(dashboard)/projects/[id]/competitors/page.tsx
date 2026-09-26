@@ -57,8 +57,10 @@ export default async function ProjectCompetitorsPage({
       readCompetitorProgress(prisma, project.id),
       prisma.competitorQuery.count({ where: { projectId: project.id } }),
       prisma.competitor.count({ where: { projectId: project.id } }),
+      // Competitor gaps only: site opportunities share the table (Phase 3.3)
+      // and have their own screen.
       prisma.opportunity.findMany({
-        where: { projectId: project.id, status: { not: "dismissed" } },
+        where: { projectId: project.id, source: "competitor", status: { not: "dismissed" } },
         orderBy: { score: "desc" },
         take: 8,
         include: { gap: true },

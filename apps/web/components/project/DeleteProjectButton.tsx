@@ -3,6 +3,7 @@
 import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Trash2, TriangleAlert } from "lucide-react";
+import { SITES_CHANGED_EVENT, emit } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
 /**
@@ -51,6 +52,7 @@ export function DeleteProjectButton({
       return;
     }
     dialogRef.current?.close();
+    emit(SITES_CHANGED_EVENT);
     router.push(redirectTo);
     router.refresh();
   }

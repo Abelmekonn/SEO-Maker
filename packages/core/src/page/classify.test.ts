@@ -42,6 +42,14 @@ describe("classifyPage", () => {
     expect(result.type).toBe("other");
     expect(result.confidence).toBeLessThan(0.5);
   });
+
+  it("files login, account, cart and search pages as utility", () => {
+    for (const path of ["/login", "/sign-in", "/account/orders", "/cart", "/checkout", "/search", "/wp-login.php"]) {
+      expect(classifyPage({ url: `https://x.com${path}` }).type).toBe("utility");
+    }
+    // A sign-up page is where a campaign lands, not a utility.
+    expect(classifyPage({ url: "https://x.com/signup" }).type).toBe("landing");
+  });
 });
 
 describe("noindexIsExpected", () => {

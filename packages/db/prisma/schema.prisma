@@ -16,6 +16,47 @@ model Account {
   updatedAt DateTime @updatedAt
 }
 
+/// One metered action a user started: a crawl or an AI generation.
+///
+/// The ledger plan allowances are counted from (Free: 2 AI generations a day,
+/// 10 a week, one re-crawl per site). Deliberately not related to Project:
+/// deleting a site and adding it again must not reset what was used.
+///
+/// A record is reserved before the job is queued, inside a per-user lock, so
+/// two concurrent requests cannot both take the last unit. The worker settles
+/// it when the job ends. Failed, cancelled and refunded records never count,
+/// so a user is not charged for a generation that produced nothing.
+///
+/// kind:   crawl | ai
+/// scope:  crawl: initial | recrawl | page     ai: page | site | competitor
+/// status: reserved | succeeded | failed | cancelled | refunded
+model UsageRecord {
+  id        String  @id @default(cuid())
+  userId    String
+  kind      String
+  scope     String
+  /// Project.siteKey. Crawl allowances are per site.
+  siteKey   String?
+  projectId String?
+  /// The page an AI generation was for, by URL identity (pageKeyOf).
+  pageKey   String?
+  /// What was requested, e.g. ["title","meta"]. For support, not billing.
+  features  Json?
+  status    String  @default("reserved")
+  /// Client-supplied idempotency key: a retried request returns this record
+  /// instead of taking another unit.
+  requestKey String?
+  /// Why it failed or was refunded. Internal.
+  error      String?
+
+  createdAt DateTime  @default(now())
+  settledAt DateTime?
+
+  @@unique([userId, requestKey])
+  @@index([userId, kind, createdAt])
+  @@index([userId, kind, siteKey])
+}
+
 model Project {
   id          String       @id @default(cuid())
   userId      String
@@ -65,6 +106,24 @@ model Project {
   /// survives re-crawls, and they unblock AI fixes that need a known type.
   pageTypeOverrides Json?
 
+  /// Deprecated: superseded by SitePage.tier, which stores every page's
+  /// classification. Read once, to seed the inventory of a project crawled
+  /// before SitePage existed; never written. Kept to avoid a destructive migration.
+  pagePriorityOverrides Json?
+
+  // Page discovery: finding the site's URLs and classifying them, without
+  // crawling them. Mirrors the perf* and comp* columns so the UI can poll the
+  // project row.
+  /// idle | queued | running | done | failed
+  discoveryStatus String    @default("idle")
+  /// initial (a new site) | new-pages (look for pages not known yet)
+  discoveryMode   String?
+  discoveryError  String?
+  discoveryAt     DateTime?
+  /// What the last discovery found: Priority / Standard counts and, for a
+  /// new-pages check, the pages it added. See DiscoveryResult in the web app.
+  discoveryResult Json?
+
   /// Normalised site identity: host without "www.", plus any path, lower-cased
   /// ("stripe.com", "example.com/blog"). Unique per user, so the same site
   /// cannot be added twice; re-crawling it is the way to refresh it.
@@ -75,6 +134,7 @@ model Project {
 
   createdAt         DateTime          @default(now())
   pages             Page[]
+  sitePages         SitePage[]
   crawls            Crawl[]
   competitors       Competitor[]
   competitorQueries CompetitorQuery[]
@@ -85,6 +145,7 @@ model Project {
 
   @@unique([userId, siteKey])
   @@index([userId])
+  @@index([userId, createdAt])
 }
 
 /// One crawl run.
@@ -134,10 +195,86 @@ model Crawl {
   startedAt  DateTime  @default(now())
   finishedAt DateTime?
 
-  pages  Page[]
-  issues PageIssue[]
+  pages     Page[]
+  issues    PageIssue[]
+  inventory CrawlInventory?
 
   @@index([projectId, startedAt])
+}
+
+/// The crawl's URL inventory: every URL it discovered that was eligible or
+/// blocked by robots.txt, with page type, importance, the reasons for it, and
+/// the Priority / Standard tier it was planned and crawled at. Also counts of
+/// the invalid, duplicate, asset and external URLs it set aside.
+///
+/// A table of its own rather than a column on Crawl: it can run to hundreds
+/// of kilobytes, and crawl history is read on every overview render. Written
+/// by crawls made before SitePage held the inventory; read now only to seed
+/// SitePage for a project crawled back then.
+model CrawlInventory {
+  crawlId String @id
+  crawl   Crawl  @relation(fields: [crawlId], references: [id], onDelete: Cascade)
+
+  /// StoredInventory from @seo-maker/core/crawl.
+  data Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// One page of the site the project knows about: its page inventory.
+///
+///   discover -> classify (once) -> the user chooses what to crawl -> crawl
+///
+/// Discovery (sitemaps, robots.txt, the homepage's links) finds the URLs, and
+/// each is classified Priority or Standard when it is first found, from
+/// deterministic evidence only (see `UrlInventory`). The classification is
+/// stored, not recomputed: a re-crawl fetches pages and never re-classifies
+/// them, and a "check for new pages" classifies only the URLs it adds. The
+/// user can move a page between tiers.
+///
+/// Separate from Page, which is one crawl's snapshot of a page: a page can be
+/// known here and never crawled, like a Standard page nobody selected yet.
+/// Matched to Page rows by `pageKey` (see pageKeyOf).
+///
+/// tier: priority | standard     tierSource: auto | user
+/// level: high | medium | low | utility (internal importance, never a ranking)
+model SitePage {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Normalized URL (normalizePageUrl), as discovery found it.
+  url      String
+  /// URL identity shared with Page rows and AI results (pageKeyOf).
+  pageKey  String
+  /// Path and query: "/pricing".
+  path     String
+  homepage Boolean @default(false)
+
+  tier       String
+  /// "user" once the user moved the page between tiers.
+  tierSource String @default("auto")
+  /// The tier discovery gave it, kept when the user changes `tier`.
+  autoTier   String
+  level      String
+  pageType   String?
+  /// Why discovery classified it as it did.
+  reasons    Json?
+  /// How discovery found it: seed | sitemap | link | user.
+  sources    Json?
+  inSitemap  Boolean @default(false)
+
+  /// When discovery first found it. Pages one check for new pages added share it.
+  discoveredAt  DateTime  @default(now())
+  /// When a crawl last fetched it, whatever the outcome. Null: never crawled.
+  lastCrawledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, pageKey])
+  @@index([projectId, tier])
 }
 
 /// status: pending | crawling | analyzing | analyzed | failed | excluded
@@ -195,8 +332,19 @@ model Page {
   contentType    String?
   language       String?
   depth          Int?
-  /// How this URL entered the crawl: seed | sitemap | link.
+  /// How this URL entered the crawl: seed | sitemap | link | user (a page
+  /// the user made Priority that the crawl did not otherwise find).
   discoveredVia  String?
+  /// The page's priority classification: priority | standard. Separate from
+  /// `pageType`, which is what the page is (homepage, service, article...).
+  ///
+  /// A Priority page keeps the full content below (text, headings, links,
+  /// images, structured data) that Page Intelligence and AI ground on. A
+  /// Standard page keeps the counts, internal links and headings the site
+  /// inventory and the deterministic checks need, without page text, image
+  /// details or full JSON-LD. A Standard page becomes Priority when the user
+  /// selects it, which fetches its full content. Null on rows from before tiers.
+  crawlTier      String?
 
   // Phase 0.2 evidence. The counts above stay for the existing deterministic
   // scoring; these carry the actual text and structure the AI layer needs and
@@ -220,6 +368,7 @@ model Page {
   @@index([projectId])
   @@index([crawlId])
   @@index([crawlId, status])
+  @@index([crawlId, crawlTier])
 }
 
 /// One deterministic finding, persisted rather than recomputed on every render.
@@ -265,6 +414,10 @@ model AiResult {
   /// that crawl is pruned from history.
   pageId    String?
   page      Page?   @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  /// The competitor a competitor-insight result is about (Phase 4.1). Kept,
+  /// as null, when the competitor is removed, so spend history survives.
+  competitorId String?
+  competitor   Competitor? @relation(fields: [competitorId], references: [id], onDelete: SetNull)
 
   feature String
   mode    String @default("quick")
@@ -291,6 +444,7 @@ model AiResult {
   @@index([pageId, feature])
   @@index([inputHash])
   @@index([projectId, pageKey, feature, createdAt])
+  @@index([competitorId, feature, createdAt])
 }
 
 /// One Lighthouse run of one page on one device.
@@ -376,6 +530,7 @@ model Competitor {
   pages         CompetitorPage[]
   analyses      CompetitorAnalysis[]
   opportunities Opportunity[]
+  aiResults     AiResult[]
 
   @@unique([projectId, domain])
   @@index([projectId])
@@ -401,7 +556,10 @@ model CompetitorPage {
   imageCount      Int?
   missingAlt      Int?
   schemaCount     Int?
+  /// schema.org @type values found in the page's JSON-LD.
   schema          Json?
+  /// H2/H3 texts, capped. Topics for the comparison (Phase 4.1); no body text.
+  headings        Json?
   indexable       Boolean?
   xRobotsTag      String?
   pageType        String?
@@ -494,6 +652,10 @@ model CompetitorAnalysis {
   strengths  Json?
   weaknesses Json?
 
+  /// The deterministic comparison with your site (CompetitorComparison):
+  /// observed facts only. AI interpretation lives in AiResult, by fact id.
+  comparison Json?
+
   aiUsed    Boolean  @default(false)
   createdAt DateTime @default(now())
 
@@ -507,6 +669,9 @@ model ContentGap {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  /// Stable identity (kind plus normalized subject), so a re-run updates the
+  /// gap in place and keeps the user's status on it.
+  key    String?
   kind   String
   title  String
   detail String?
@@ -531,12 +696,14 @@ model ContentGap {
 
   opportunity Opportunity?
 
+  @@unique([projectId, key])
   @@index([projectId, status])
 }
 
 /// category: content | technical | onpage | performance | structured-data | internal-links
 /// effort: low | medium | high
-/// status: open | in-progress | done | dismissed
+/// status: open | in-progress | done | dismissed (the user's; the crawl's verdict is resolvedAt)
+/// source: site (Site Intelligence, Phase 3.3) | competitor (content gaps, Phase 4.2)
 model Opportunity {
   id        String  @id @default(cuid())
   projectId String
@@ -548,23 +715,53 @@ model Opportunity {
   competitorId String?
   competitor   Competitor? @relation(fields: [competitorId], references: [id], onDelete: SetNull)
 
+  /// Stable identity from the deterministic engine ("check:meta",
+  /// "links:orphans"), so re-deriving after a crawl updates this row and keeps
+  /// its status and history instead of creating a new one.
+  key    String?
+  source String  @default("site")
+
   category  String
   title     String
   rationale String?
   action    String?
+  /// The single first step, written by AI when it has run.
+  nextStep  String?
 
-  /// OPPORTUNITY SCORE 0-100.
+  /// PRIORITY / OPPORTUNITY SCORE 0-100. Always computed by code, never by AI.
   score Float
   band  String
   parts Json?
 
-  effort String?
+  effort     String?
+  /// 0..1 confidence in the evidence behind it.
+  confidence Float?
+
+  /// Verifiable facts from the crawl, and the hash the AI wording was written
+  /// against: when the facts change, the wording is reset rather than left stale.
+  evidence      Json?
+  /// Affected pages as { key, url, path }, capped.
+  affectedUrls  Json?
+  affectedCount Int     @default(0)
+
+  /// What was affected when first found, for re-crawl comparison (Phase 4.7).
+  baselineCount   Int?
+  baselineCrawlId String?
+  /// The crawl this was last derived from.
+  crawlId         String?
+  /// When a later crawl no longer found the condition. The crawl's verdict,
+  /// separate from the user's `status`.
+  resolvedAt      DateTime?
+
+  /// The AiResult whose wording is shown, when aiUsed.
+  aiResultId String?
 
   status    String   @default("open")
   aiUsed    Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([projectId, key])
   @@index([projectId, status, score])
 }
 

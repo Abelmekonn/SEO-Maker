@@ -1,23 +1,27 @@
-import type { Page } from "@seo-maker/db";
 import { PageAuditTable } from "@/components/project/PageAuditTable";
 import { PagesAnalytics } from "@/components/project/PagesAnalytics";
+import type { InventoryRow, TieredPage } from "@/lib/site-inventory";
 
 export function PagesBoard({
   pages,
+  uncrawled,
   projectId,
-  maxPages = 1,
-  planLabel = "Free",
+  planLabel,
+  maxPages,
 }: {
-  pages: Page[];
+  /** The latest crawl's pages, with their classification. */
+  pages: TieredPage[];
+  /** Inventory pages no crawl has fetched yet: listed, never counted as crawled. */
+  uncrawled: InventoryRow[];
   projectId: string;
-  maxPages?: number;
-  planLabel?: string;
+  planLabel: string;
+  maxPages: number;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <PagesAnalytics pages={pages} maxPages={maxPages} planLabel={planLabel} />
+      <PagesAnalytics pages={pages} planLabel={planLabel} maxPages={maxPages} />
       <section aria-label="Page list" className="flex min-h-0 flex-1 flex-col">
-        <PageAuditTable pages={pages} projectId={projectId} />
+        <PageAuditTable pages={pages} uncrawled={uncrawled} projectId={projectId} />
       </section>
     </div>
   );

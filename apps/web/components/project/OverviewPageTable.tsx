@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ArrowUpRight, Search } from "lucide-react";
 import type { Page } from "@seo-maker/db";
 import { ScoreRing } from "@/components/project/ScoreRing";
-import { Button } from "@/components/ui/button";
 import {
   failedChecks,
   healthLabels,
@@ -17,7 +17,11 @@ import {
 import { pagePath } from "@/lib/site-url";
 import { cn } from "@/lib/utils";
 
-const PAGE_SIZE = 8;
+/**
+ * A preview: the overview shows this many pages, and "View more" opens the
+ * Pages screen, which holds the full inventory.
+ */
+const PREVIEW_ROWS = 8;
 
 type Tab = "all" | "issues" | "warnings" | "optimized";
 
@@ -58,7 +62,6 @@ export function OverviewPageTable({
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("all");
   const [query, setQuery] = useState("");
-  const [pageIndex, setPageIndex] = useState(0);
 
   const liveRows = useMemo<OverviewTableRow[]>(
     () =>
@@ -94,11 +97,7 @@ export function OverviewPageTable({
     });
   }, [query, rows, tab]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safeIndex = Math.min(pageIndex, pageCount - 1);
-  const slice = filtered.slice(safeIndex * PAGE_SIZE, safeIndex * PAGE_SIZE + PAGE_SIZE);
-  const from = filtered.length === 0 ? 0 : safeIndex * PAGE_SIZE + 1;
-  const to = Math.min(filtered.length, (safeIndex + 1) * PAGE_SIZE);
+  const slice = filtered.slice(0, PREVIEW_ROWS);
 
   const tabs: Array<{ id: Tab; label: string; count: number }> = [
     { id: "all", label: "All pages", count: counts.all },
@@ -121,10 +120,7 @@ export function OverviewPageTable({
                 "inline-flex h-11 items-center gap-1 rounded-md px-3 font-mono text-[12px]",
                 tab === item.id ? "bg-surface-card text-ink" : "text-muted-foreground hover:text-ink",
               )}
-              onClick={() => {
-                setTab(item.id);
-                setPageIndex(0);
-              }}
+              onClick={() => setTab(item.id)}
             >
               {item.label}
               <span className="tabular-nums">({item.count})</span>
@@ -137,10 +133,7 @@ export function OverviewPageTable({
           <input
             type="search"
             value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setPageIndex(0);
-            }}
+            onChange={(event) => setQuery(event.target.value)}
             placeholder="Search pages"
             className="h-11 w-full rounded-md border border-hairline bg-canvas pl-9 pr-3 text-sm text-ink outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
           />
@@ -198,7 +191,7 @@ export function OverviewPageTable({
                       }
                     }}
                   >
-                    <td className="max-w-[220px] px-5 py-4 font-mono text-ink">
+                    <td className="max-w-[420px] px-5 py-4 font-mono text-ink">
                       <span className="block truncate" title={row.path}>
                         {row.path}
                       </span>
@@ -220,7 +213,7 @@ export function OverviewPageTable({
                         {healthLabels[row.health]}
                       </span>
                     </td>
-                    <td className="max-w-[240px] px-5 py-4">
+                    <td className="w-full max-w-0 px-5 py-4">
                       <span className="block truncate text-body" title={row.title || undefined}>
                         {row.title || "-"}
                       </span>
@@ -246,36 +239,18 @@ export function OverviewPageTable({
       )}
 
       {filtered.length > 0 ? (
-        <nav
-          aria-label="Page table"
-          className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-3"
-        >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-2">
           <p className="font-mono text-[12px] text-muted-foreground">
-            {from} to {to} of {filtered.length} pages
+            Showing {slice.length} of {filtered.length} {filtered.length === 1 ? "page" : "pages"}
           </p>
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-11 w-fit"
-              disabled={safeIndex === 0}
-              onClick={() => setPageIndex((value) => Math.max(0, value - 1))}
-            >
-              <ChevronLeft className="size-4" aria-hidden />
-              Previous
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-11 w-fit"
-              disabled={safeIndex >= pageCount - 1}
-              onClick={() => setPageIndex((value) => Math.min(pageCount - 1, value + 1))}
-            >
-              Next
-              <ChevronRight className="size-4" aria-hidden />
-            </Button>
-          </div>
-        </nav>
+          <Link
+            href={`/projects/${projectId}/pages`}
+            className="inline-flex h-11 items-center gap-1 font-mono text-[12px] text-body hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            View more
+            <ArrowUpRight className="size-3.5" aria-hidden />
+          </Link>
+        </div>
       ) : null}
     </div>
   );

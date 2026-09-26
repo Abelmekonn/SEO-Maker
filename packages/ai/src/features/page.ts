@@ -28,18 +28,22 @@ import {
 
 export type PageFeature = "title" | "meta" | "heading" | "content" | "schema" | "internal-link" | "image-alt";
 
-export type Refine<T> = (data: T) => { ok: true; data: T } | { ok: false; reason: string };
+/** `imagesSent` says whether the model actually saw the images it was offered. */
+export type Refine<T> = (data: T, context?: { imagesSent: boolean }) => { ok: true; data: T } | { ok: false; reason: string };
 
 export type PageFeatureSpec<T> = {
   feature: AiFeature;
-  schema: z.ZodType<T>;
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   knowledge: KnowledgeQuery;
   /** Hashed into the cache key, and the only page facts the prompt contains. */
   evidence: Record<string, unknown>;
-  buildPrompt: (knowledgeBlock: string) => { system: string; user: string };
+  /** `imagesAttached` is true only when the images will reach the model. */
+  buildPrompt: (knowledgeBlock: string, options?: { imagesAttached: boolean }) => { system: string; user: string };
   refine?: Refine<T>;
   maxTokens: number;
   temperature: number;
+  /** Images a multimodal provider may look at. Refs match `src` in the evidence. */
+  imageRefs?: string[];
 };
 
 /** Business context as the prompt sees it. Null in Quick mode. */
@@ -64,6 +68,9 @@ export const PAGE_SYSTEM_PROMPT = [
 ].join("\n");
 
 const EXCERPT = { short: 1500, medium: 2500, long: 4000 } as const;
+
+/** Images offered per alt-text request. */
+const MAX_ALT_IMAGES = 8;
 
 function excerpt(context: PageContext, chars: number): string | null {
   return context.contentExcerpt ? context.contentExcerpt.slice(0, chars) : null;
@@ -137,7 +144,7 @@ function titleSpec(context: PageContext, business: BusinessBlock): PageFeatureSp
     buildPrompt: (block) => ({
       system: PAGE_SYSTEM_PROMPT,
       user: userPrompt(evidence, context.evidenceGaps, business, block, [
-        "Write up to three replacement <title> texts for this page, best first.",
+        "Write three or four replacement <title> texts for this page, best first, each a real alternative. Write fewer only when the evidence cannot support that many.",
         "Each must be unique to this page, describe what the page actually covers, and fit its search intent.",
         "Use the business name only if it appears in the evidence or the business context.",
         'In `diagnosis`, state what is wrong with the current title, or "No title tag" when there is none.',
@@ -171,7 +178,7 @@ function metaSpec(context: PageContext, business: BusinessBlock): PageFeatureSpe
     buildPrompt: (block) => ({
       system: PAGE_SYSTEM_PROMPT,
       user: userPrompt(evidence, context.evidenceGaps, business, block, [
-        "Write up to three meta descriptions for this page, best first.",
+        "Write three or four meta descriptions for this page, best first, each a real alternative. Write fewer only when the evidence cannot support that many.",
         "Each must be unique to this page and name its most relevant points, taken from the content excerpt.",
         'In `diagnosis`, state what is wrong with the current description, or "No meta description".',
         "Return JSON: {",
@@ -204,7 +211,7 @@ function headingSpec(context: PageContext, business: BusinessBlock): PageFeature
     buildPrompt: (block) => ({
       system: PAGE_SYSTEM_PROMPT,
       user: userPrompt(evidence, context.evidenceGaps, business, block, [
-        "Write up to three top-level headings (H1) for this page, best first.",
+        "Write three or four top-level headings (H1) for this page, best first, each a real alternative. Write fewer only when the evidence cannot support that many.",
         "Each must state plainly what the page is about, using the page's own content.",
         "Do not claim a heading count rule: search engines do not require exactly one H1.",
         'In `diagnosis`, state what is wrong with the current H1, or "No H1 on the page".',
@@ -349,6 +356,8 @@ function internalLinkSpec(
         "Suggest internal links from this page to related pages on the same site.",
         "`targetUrl` MUST be copied exactly from `candidateTargets`. Any other URL is rejected.",
         "Pick targets whose title is genuinely related to this page's content. Fewer good links beat many weak ones.",
+        "A target with `fetched: false` is a page the site lists that this crawl did not read: judge it by its URL",
+        "path only, pick it only when the path clearly relates, and never describe content it may have.",
         "`anchorText` should describe the target page, not say \"click here\".",
         "`placement` says where in this page's content the link fits, referring to its real text.",
         "Return JSON: {",
@@ -370,8 +379,22 @@ function internalLinkSpec(
   };
 }
 
+/**
+ * Alt text for images without an alt attribute.
+ *
+ * Two kinds of evidence, never mixed up. A provider that can see images gets
+ * the images themselves (the worker fetches them) and may describe what it
+ * sees, with `basis: "image"`. Any other provider cannot see them, and may
+ * write alt text only from a caption, nearby text or a meaningful filename.
+ * The refinement enforces this after the fact: "image" is accepted only when
+ * the images really were sent, and only for an image that was.
+ */
 function imageAltSpec(context: PageContext, business: BusinessBlock): PageFeatureSpec<z.infer<typeof imageAltSchema>> {
-  const images = context.imagesMissingAlt;
+  // A handful per request keeps the answer short enough to come back whole;
+  // images that can be seen go first.
+  const images = [...context.imagesMissingAlt]
+    .sort((a, b) => Number(b.fetchable) - Number(a.fetchable))
+    .slice(0, MAX_ALT_IMAGES);
   const evidence = {
     ...common(context),
     title: context.title,
@@ -385,30 +408,47 @@ function imageAltSpec(context: PageContext, business: BusinessBlock): PageFeatur
     evidence,
     maxTokens: 2000,
     temperature: 0.2,
-    buildPrompt: (block) => ({
-      system: PAGE_SYSTEM_PROMPT,
-      user: userPrompt(evidence, context.evidenceGaps, business, block, [
-        "Suggest alt text for the images in `imagesMissingAlt`. You CANNOT see these images.",
-        "Write alt text only from an image's `context` (caption or nearby text) or a meaningful `filename`,",
-        "and set `basis` to what you used. If neither tells you what the image shows, put it in `skipped`",
-        "with the reason. Do not guess what an image looks like.",
-        "Alt text describes the image's role on the page in a short phrase. Do not start with \"image of\".",
-        "Return JSON: {",
-        '  "images": [{ "src": string, "alt": string, "basis": "caption"|"surrounding-text"|"filename" }],',
-        '  "skipped": [{ "src": string, "reason": string }],',
-        '  "groundedIn": string[], "confidence": "high"|"medium"|"low", "needsHumanReview": true',
-        "}",
-      ]),
-    }),
-    refine: (data) => {
+    imageRefs: images.filter((image) => image.fetchable).map((image) => image.src),
+    buildPrompt: (block, options) => {
+      const seen = Boolean(options?.imagesAttached);
+      return {
+        system: PAGE_SYSTEM_PROMPT,
+        user: userPrompt(evidence, context.evidenceGaps, business, block, [
+          "Suggest alt text for the images in `imagesMissingAlt`.",
+          ...(seen
+            ? [
+                "Some of these images are attached after this message, each labelled with its `src`.",
+                "For an attached image, describe what it shows and its role on this page, and set `basis` to \"image\".",
+                "For an image that is not attached, use only its `context` (caption or nearby text) or a meaningful",
+                "`filename`, and set `basis` to what you used.",
+              ]
+            : [
+                "You CANNOT see these images. Write alt text only from an image's `context` (caption or nearby text)",
+                "or a meaningful `filename`, and set `basis` to what you used. Never use basis \"image\".",
+              ]),
+          `\`basis\` must be exactly one of: ${seen ? '"image", ' : ""}"caption", "surrounding-text" (for an image's \`context\`), "filename".`,
+          "If nothing tells you what an image shows, put it in `skipped` with the reason. Do not guess.",
+          "Always include `groundedIn`, `confidence` and `needsHumanReview`.",
+          "Alt text describes the image's role on the page in a short phrase. Do not start with \"image of\".",
+          "Return JSON: {",
+          `  "images": [{ "src": string, "alt": string, "basis": ${seen ? '"image"|' : ""}"caption"|"surrounding-text"|"filename" }],`,
+          '  "skipped": [{ "src": string, "reason": string }],',
+          '  "groundedIn": string[], "confidence": "high"|"medium"|"low", "needsHumanReview": true',
+          "}",
+        ]),
+      };
+    },
+    refine: (data, context) => {
       const offered = new Map(images.map((image) => [image.src, image]));
+      const imagesSent = Boolean(context?.imagesSent);
       const kept = data.images.filter((row) => {
         const source = offered.get(row.src);
         if (!source) return false;
+        if (row.basis === "image") return imagesSent && source.fetchable;
         if (row.basis === "filename") return Boolean(source.filename);
         return source.context.trim().length > 0;
       });
-      // Nobody can verify alt text without looking at the image.
+      // Alt text is published copy about a picture: a person checks it first.
       return { ok: true, data: { ...data, images: kept, needsHumanReview: true } };
     },
   };

@@ -7,9 +7,10 @@ import {
   isAnalysisMode,
   parseBusinessContext,
 } from "@/lib/business-context";
+import { siteCrawlAllowance } from "@/lib/crawl-access";
 import { getAccountForUser } from "@/lib/plan";
 import { requireUserId } from "@/lib/projects";
-import { enqueueHomepageCrawl } from "@/lib/queue";
+import { enqueueDiscovery } from "@/lib/queue";
 import { normalizeSiteUrl, siteKeyOf } from "@/lib/site-url";
 
 export async function GET() {
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
   if (duplicate) {
     return NextResponse.json(
       {
-        error: `You already added ${siteKey}. Open it and use Crawl site to refresh it.`,
+        error: `You already added ${siteKey}. Open it and use Re-crawl Site to refresh it.`,
         duplicate: true,
         id: duplicate.id,
       },
@@ -97,6 +98,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // Crawls are counted per site, not per project: a site deleted and added
+  // again keeps what it already used.
+  const allowance = await siteCrawlAllowance(userId, siteKey, account.limits);
+  if (allowance.remaining === 0) {
+    return NextResponse.json(
+      {
+        error: `You have already used ${account.limits.label}'s crawls of ${siteKey}. Upgrade to crawl it again.`,
+        upgrade: account.plan === "free",
+        code: "recrawl-limit",
+      },
+      { status: 402 },
+    );
+  }
+
   const requested = parseBusinessContext(body?.business);
   const requestedMode = isAnalysisMode(body?.mode)
     ? body.mode
@@ -104,36 +119,32 @@ export async function POST(request: Request) {
       ? "deep"
       : "quick";
 
-  // Deep mode is a paid capability. Downgrade rather than reject: the user
-  // asked for an analysis of a real site, and refusing the whole request over
-  // an optional extra would be a worse answer than running the quick pass.
-  // Context is dropped with it, so nothing paid-for is stored on a free plan.
+  // Deep Analysis is on every plan now; the check stays so a plan without it
+  // downgrades to Quick rather than rejecting the whole request.
   const allowDeep = account.limits.deepMode;
   const mode = allowDeep ? requestedMode : "quick";
   const context = allowDeep ? requested : parseBusinessContext(undefined);
 
+  // A new site is discovered first, not crawled: its pages are found and
+  // classified Priority or Standard, and the user then starts the crawl of
+  // its Priority pages. Nothing is charged until that crawl is started.
   let project;
   try {
     project = await prisma.project.create({
-    include: { pages: true },
-    data: {
-      userId,
-      rootUrl: normalized.href,
-      siteKey,
-      name: context.businessName ?? normalized.hostname,
-      maxPages: account.limits.maxPages,
-      status: "pending",
-      analysisMode: mode,
-      ...contextToPrisma(context),
-      contextUpdatedAt: hasAnyContext(context) ? new Date() : null,
-      pages: {
-        create: {
-          url: normalized.href,
-          status: "pending",
-        },
+      data: {
+        userId,
+        rootUrl: normalized.href,
+        siteKey,
+        name: context.businessName ?? normalized.hostname,
+        maxPages: account.limits.maxPages,
+        status: "discovering",
+        discoveryStatus: "queued",
+        discoveryMode: "initial",
+        analysisMode: mode,
+        ...contextToPrisma(context),
+        contextUpdatedAt: hasAnyContext(context) ? new Date() : null,
       },
-    },
-  });
+    });
   } catch (error) {
     // Two submits of the same site racing past the check above.
     if ((error as { code?: string }).code === "P2002") {
@@ -145,17 +156,19 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  const homepage = project.pages[0];
-  if (homepage) {
-    try {
-      await enqueueHomepageCrawl({
-        projectId: project.id,
-        pageId: homepage.id,
-        url: homepage.url,
-      });
-    } catch (error) {
-      console.error("Failed to enqueue homepage crawl", error);
-    }
+  try {
+    await enqueueDiscovery({ projectId: project.id, mode: "initial" });
+  } catch (error) {
+    console.error("Failed to enqueue discovery", error);
+    // The site is kept; its overview offers to try again.
+    await prisma.project.update({
+      where: { id: project.id },
+      data: {
+        status: "failed",
+        discoveryStatus: "failed",
+        discoveryError: "The crawler queue is offline, so this site's pages could not be discovered. Try again shortly.",
+      },
+    });
   }
 
   return NextResponse.json({ id: project.id });

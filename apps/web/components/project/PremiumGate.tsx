@@ -61,12 +61,11 @@ export function GoPremiumButton({
                 id={titleId}
                 className="font-display text-[24px] leading-7 tracking-[-0.5px] text-ink"
               >
-                See every problem, on every page
+                Every page, every AI capability
               </h2>
               <p className="max-w-lg text-sm leading-6 text-body">
-                Free checks your homepage and names what is wrong. Premium crawls more of the
-                site, shows the exact evidence and the fix for each problem, and unlocks
-                competitors and AI.
+                Free gives you the whole product on your homepage. Pro and Agency cover every page of the
+                site, with Page, Site and Competitor AI and no daily AI cap.
               </p>
             </div>
             {/* Not a <form method="dialog">: this button can render inside another form. */}
@@ -248,7 +247,7 @@ export function PremiumPage({
             ))}
           </ul>
           <p className="mt-auto border-t border-hairline pt-4 text-sm leading-6 text-body">
-            Your homepage audit stays free.{" "}
+            Your homepage analysis stays free.{" "}
             <Link
               href={`/projects/${projectId}`}
               className="text-ink underline underline-offset-4 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

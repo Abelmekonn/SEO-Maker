@@ -4,6 +4,7 @@ import { LoaderCircle, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { COMPETITOR_QUEUED_EVENT, emit } from "@/lib/events";
 
 /**
  * The manual escape hatch. This is the one path that works with no SERP
@@ -42,6 +43,7 @@ export function CompetitorAddForm({
       return;
     }
     setDomain("");
+    emit(COMPETITOR_QUEUED_EVENT);
     router.refresh();
   }
 

@@ -3,6 +3,7 @@
 import { LoaderCircle, Pin, RotateCw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { COMPETITOR_QUEUED_EVENT, emit } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
 type Action = "pin" | "analyze" | "remove";
@@ -47,6 +48,7 @@ export function CompetitorRowActions({
       setError(data?.error ?? "That did not work.");
       return;
     }
+    if (action === "analyze") emit(COMPETITOR_QUEUED_EVENT);
     router.refresh();
   }
 

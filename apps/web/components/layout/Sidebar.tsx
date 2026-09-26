@@ -17,18 +17,22 @@ import {
   Loader2,
   Lock,
   Menu,
+  Network,
   Plus,
+  Search,
   Settings,
   Sparkles,
-  Star,
   Swords,
   Wrench,
   X,
+  Zap,
 } from "lucide-react";
 import { AI_QUEUED_EVENT } from "@/components/project/AiQueueStatus";
 import { CRAWL_QUEUED_EVENT } from "@/components/project/CrawlMiniStatus";
+import { SearchDialog } from "@/components/layout/SearchDialog";
 import { clerkDarkAppearance } from "@/lib/clerk-appearance";
-import type { PlanId } from "@/lib/plan";
+import { AI_USAGE_EVENT, COMPETITOR_QUEUED_EVENT, OPEN_SEARCH_EVENT, SITES_CHANGED_EVENT, emit } from "@/lib/events";
+import { type PlanId, planLimits } from "@seo-maker/core/plan";
 import { cn } from "@/lib/utils";
 
 type ProjectSummary = { id: string; name: string; status: string };
@@ -36,8 +40,10 @@ type ProjectSummary = { id: string; name: string; status: string };
 type Activity = {
   crawl: { running: boolean; done: number; total: number };
   performance: { running: boolean; done: number; total: number };
-  competitors: { running: boolean };
+  competitors: { running: boolean; done?: number; total?: number };
   ai: { running: boolean; jobs: number };
+  opportunities?: { running: boolean };
+  competitorAi?: { running: boolean };
 };
 
 /**
@@ -66,16 +72,23 @@ function useProjectActivity(projectId: string | null): Activity | null {
     window.addEventListener(CRAWL_QUEUED_EVENT, bump);
     window.addEventListener(AI_QUEUED_EVENT, bump);
     window.addEventListener("seo-maker:perf-queued", bump);
+    window.addEventListener(COMPETITOR_QUEUED_EVENT, bump);
     return () => {
       window.removeEventListener(CRAWL_QUEUED_EVENT, bump);
       window.removeEventListener(AI_QUEUED_EVENT, bump);
       window.removeEventListener("seo-maker:perf-queued", bump);
+      window.removeEventListener(COMPETITOR_QUEUED_EVENT, bump);
     };
   }, []);
 
   const busy = Boolean(
     activity &&
-      (activity.crawl.running || activity.performance.running || activity.competitors.running || activity.ai.running),
+      (activity.crawl.running ||
+        activity.performance.running ||
+        activity.competitors.running ||
+        activity.ai.running ||
+        activity.opportunities?.running ||
+        activity.competitorAi?.running),
   );
   useEffect(() => {
     if (!projectId) return;
@@ -94,32 +107,42 @@ function projectIdFromPath(pathname: string) {
   return parts[2];
 }
 
+
 export function Sidebar({ plan }: { plan: PlanId }) {
   const pathname = usePathname();
   const projectId = projectIdFromPath(pathname);
   const projectBase = projectId ? `/projects/${projectId}` : null;
+  const limits = planLimits[plan];
 
   const workspaceItems = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
-    { href: "/projects/new", label: "Add project", icon: Plus, exact: true },
+    { href: "/quick-search", label: "Quick Search", icon: Zap, exact: true },
   ];
 
-  const primaryItems = projectBase
+  const siteItems = projectBase
     ? [
-        { href: projectBase, label: "Overview", icon: Hexagon, exact: true },
-        { href: `${projectBase}/pages`, label: "Pages", icon: FileText, exact: false },
-        { href: `${projectBase}/performance`, label: "Performance", icon: Gauge, exact: false },
-        { href: `${projectBase}/competitors`, label: "Competitors", icon: Swords, exact: false, premium: true },
-        { href: `${projectBase}/opportunities`, label: "Opportunities", icon: Lightbulb, exact: false, premium: true },
+        { href: projectBase, label: "Overview", icon: Hexagon, exact: true, locked: false },
+        { href: `${projectBase}/pages`, label: "Pages", icon: FileText, exact: false, locked: false },
+        { href: `${projectBase}/performance`, label: "Performance", icon: Gauge, exact: false, locked: !limits.performance },
+        { href: `${projectBase}/competitors`, label: "Competitors", icon: Swords, exact: false, locked: limits.maxCompetitors === 0 },
+        { href: `${projectBase}/opportunities`, label: "Opportunities", icon: Lightbulb, exact: false, locked: plan === "free" },
       ]
     : [];
 
-  const secondaryItems = projectBase
+  // The three AI capabilities. Each runs only when the user asks for it.
+  const aiItems = projectBase
     ? [
-        { href: `${projectBase}/tools`, label: "Tools", icon: Wrench, exact: false, premium: true },
-        { href: `${projectBase}/suggestions`, label: "AI workspace", icon: Sparkles, exact: false, premium: true },
-        { href: `${projectBase}/reports`, label: "Reports", icon: ClipboardList, exact: false, premium: true },
-        { href: `${projectBase}/settings`, label: "Settings", icon: Settings, exact: false },
+        { href: `${projectBase}/ai/pages`, label: "Page Analysis", icon: Sparkles, exact: false, locked: !limits.ai },
+        { href: `${projectBase}/ai/site`, label: "Site Strategy", icon: Network, exact: false, locked: !limits.siteAi },
+        { href: `${projectBase}/ai/competitors`, label: "Competitor Analysis", icon: Swords, exact: false, locked: !limits.competitorAi },
+      ]
+    : [];
+
+  const moreItems = projectBase
+    ? [
+        { href: `${projectBase}/tools`, label: "Tools", icon: Wrench, exact: false, locked: plan === "free" },
+        { href: `${projectBase}/reports`, label: "Reports", icon: ClipboardList, exact: false, locked: plan === "free" },
+        { href: `${projectBase}/settings`, label: "Settings", icon: Settings, exact: false, locked: false },
       ]
     : [];
 
@@ -135,8 +158,14 @@ export function Sidebar({ plan }: { plan: PlanId }) {
         ? `${activity.performance.done}/${activity.performance.total}`
         : true
       : undefined,
-    [`${projectBase}/competitors`]: activity?.competitors.running ? true : undefined,
-    [`${projectBase}/suggestions`]: activity?.ai.running ? `${activity.ai.jobs}` : undefined,
+    [`${projectBase}/competitors`]: activity?.competitors.running
+      ? activity.competitors.total
+        ? `${activity.competitors.done ?? 0}/${activity.competitors.total}`
+        : true
+      : undefined,
+    [`${projectBase}/ai/pages`]: activity?.ai.running ? `${activity.ai.jobs}` : undefined,
+    [`${projectBase}/ai/site`]: activity?.opportunities?.running ? true : undefined,
+    [`${projectBase}/ai/competitors`]: activity?.competitorAi?.running ? true : undefined,
   };
 
   function isActive(href: string, exact: boolean) {
@@ -170,6 +199,11 @@ export function Sidebar({ plan }: { plan: PlanId }) {
     };
   }, [open]);
 
+  function openSearch() {
+    setOpen(false);
+    emit(OPEN_SEARCH_EVENT);
+  }
+
   return (
     <>
       <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-hairline bg-canvas/90 px-4 backdrop-blur lg:hidden">
@@ -180,16 +214,26 @@ export function Sidebar({ plan }: { plan: PlanId }) {
           <Image src="/logo.png" alt="" width={24} height={24} className="size-6 rounded-full" />
           <span className="font-display text-[15px] font-semibold text-ink">SEO Maker</span>
         </Link>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-expanded={open}
-          aria-controls={drawerId}
-          aria-label="Open navigation"
-          className="flex size-11 cursor-pointer items-center justify-center rounded-full text-ink hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Menu className="size-5" aria-hidden />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={openSearch}
+            aria-label="Search sites, pages and settings"
+            className="flex size-11 cursor-pointer items-center justify-center rounded-full text-ink hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Search className="size-5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-expanded={open}
+            aria-controls={drawerId}
+            aria-label="Open navigation"
+            className="flex size-11 cursor-pointer items-center justify-center rounded-full text-ink hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Menu className="size-5" aria-hidden />
+          </button>
+        </div>
       </header>
 
       {open ? (
@@ -200,99 +244,290 @@ export function Sidebar({ plan }: { plan: PlanId }) {
         />
       ) : null}
 
-    <aside
-      id={drawerId}
-      className={cn(
-        "flex h-dvh w-64 shrink-0 flex-col border-r border-hairline bg-canvas lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-56",
-        open ? "fixed inset-y-0 left-0 z-50" : "hidden",
-      )}
-    >
-      <div className="flex shrink-0 items-center justify-between px-3 pt-4 pb-3">
-        <Link
-          href="/dashboard"
-          className="cursor-pointer flex items-end gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Image
-            src="/logo.png"
-            alt=""
-            width={28}
-            height={28}
-            className="mt-0.5 size-7 shrink-0 rounded-full"
-          />
-          <span className="min-w-0">
+      <SearchDialog projectId={projectId} />
+
+      <aside
+        id={drawerId}
+        className={cn(
+          "flex h-dvh w-64 shrink-0 flex-col border-r border-hairline bg-canvas lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-60",
+          open ? "fixed inset-y-0 left-0 z-50" : "hidden",
+        )}
+      >
+        <div className="flex shrink-0 items-center justify-between px-3 pt-4 pb-3">
+          <Link
+            href="/dashboard"
+            className="cursor-pointer flex items-end gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Image src="/logo.png" alt="" width={28} height={28} className="mt-0.5 size-7 shrink-0 rounded-full" />
             <span className="block font-display text-[15px] font-semibold leading-5 tracking-[-0.2px] text-ink">
               SEO Maker
             </span>
-          </span>
-        </Link>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          aria-label="Close navigation"
-          className="flex size-11 cursor-pointer items-center justify-center rounded-full text-muted-foreground hover:bg-surface-soft hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
-        >
-          <X className="size-4" aria-hidden />
-        </button>
-      </div>
+          </Link>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close navigation"
+            className="flex size-11 cursor-pointer items-center justify-center rounded-full text-muted-foreground hover:bg-surface-soft hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+        </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2.5 pb-3">
-        <NavSection label="Workspace">
-          {projectId ? (
-            <WorkspaceSwitcher projectId={projectId} />
-          ) : (
-            workspaceItems.map((item) => (
+        <div className="px-2.5 pb-3">
+          <button
+            type="button"
+            onClick={openSearch}
+            className="flex h-9 w-full cursor-pointer items-center gap-2 rounded-full px-3 text-left text-[13px] text-muted-foreground ring-1 ring-hairline hover:bg-surface-soft hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Search className="size-3.5 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">Search</span>
+            <kbd className="rounded bg-surface-card px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">Ctrl K</kbd>
+          </button>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-2.5 pb-3">
+          <NavSection label="Workspace">
+            {workspaceItems.map((item) => (
               <NavLink key={item.href} href={item.href} active={isActive(item.href, item.exact)}>
                 <item.icon className="size-3.5 shrink-0" aria-hidden />
                 {item.label}
               </NavLink>
-            ))
-          )}
-        </NavSection>
-
-        {projectBase ? (
-          <NavSection label="Project" className="mt-5">
-            {primaryItems.map((item) => (
-              <NavLink
-                key={item.href}
-                href={item.href}
-                active={isActive(item.href, item.exact)}
-                locked={plan === "free" && "premium" in item}
-                activity={running[item.href]}
-              >
-                <item.icon className="size-3.5 shrink-0" aria-hidden />
-                {item.label}
-              </NavLink>
             ))}
-            <div className="mt-3 flex flex-col gap-0.5">
-              {secondaryItems.map((item) => (
-                  <NavLink
-                  key={item.href}
-                  href={item.href}
-                  active={isActive(item.href, item.exact)}
-                  locked={plan === "free" && "premium" in item}
-                  activity={running[item.href]}
-                >
-                  <item.icon className="size-3.5 shrink-0" aria-hidden />
-                  {item.label}
-                </NavLink>
-              ))}
-            </div>
+            <NavLink href="/sites" active={isActive("/sites", true)}>
+              <Globe className="size-3.5 shrink-0" aria-hidden />
+              Sites
+            </NavLink>
+            <RecentSites currentId={projectId} />
+            <NavLink href="/projects/new" active={isActive("/projects/new", true)}>
+              <Plus className="size-3.5 shrink-0" aria-hidden />
+              Add website
+            </NavLink>
           </NavSection>
-        ) : (
-          <p className="mt-5 px-2.5 text-xs leading-5 text-muted-soft">
-            Open a project to see its overview, pages, performance, and competitors.
-          </p>
-        )}
-      </div>
 
-      <div className="shrink-0 space-y-2 px-2.5 pb-3">
-        {plan === "free" ? <UpgradeCard /> : null}
-        <ProfileFooter />
-      </div>
-    </aside>
+          {projectBase && projectId ? (
+            <>
+              <NavSection label="Site">
+                <WorkspaceSwitcher projectId={projectId} />
+                <div className="mt-1.5 flex flex-col gap-0.5">
+                  {siteItems.map((item) => (
+                    <NavLink
+                      key={item.href}
+                      href={item.href}
+                      active={isActive(item.href, item.exact)}
+                      locked={item.locked}
+                      activity={running[item.href]}
+                    >
+                      <item.icon className="size-3.5 shrink-0" aria-hidden />
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </NavSection>
+
+              <NavSection label="AI Workspace">
+                {aiItems.map((item) => (
+                  <NavLink
+                    key={item.href}
+                    href={item.href}
+                    active={isActive(item.href, item.exact)}
+                    locked={item.locked}
+                    activity={running[item.href]}
+                  >
+                    <item.icon className="size-3.5 shrink-0" aria-hidden />
+                    {item.label}
+                  </NavLink>
+                ))}
+              </NavSection>
+
+              <NavSection label="More">
+                {moreItems.map((item) => (
+                  <NavLink
+                    key={item.href}
+                    href={item.href}
+                    active={isActive(item.href, item.exact)}
+                    locked={item.locked}
+                    activity={running[item.href]}
+                  >
+                    <item.icon className="size-3.5 shrink-0" aria-hidden />
+                    {item.label}
+                  </NavLink>
+                ))}
+              </NavSection>
+            </>
+          ) : (
+            <p className="px-2.5 text-xs leading-5 text-muted-soft">
+              Open a site to see its pages, performance and AI Workspace.
+            </p>
+          )}
+        </div>
+
+        <div className="shrink-0 space-y-2 px-2.5 pb-3">
+          {plan === "free" ? <AllowanceCard /> : null}
+          <ProfileFooter />
+        </div>
+      </aside>
     </>
   );
 }
+
+type RecentSite = { id: string; name: string; host: string; status: string };
+
+/**
+ * The three most recently active sites, under Sites. Refetched when the
+ * route changes and whenever a site is added, deleted or crawled here.
+ */
+function RecentSites({ currentId }: { currentId: string | null }) {
+  const pathname = usePathname();
+  const [sites, setSites] = useState<RecentSite[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setTick((value) => value + 1);
+    window.addEventListener(SITES_CHANGED_EVENT, bump);
+    window.addEventListener(CRAWL_QUEUED_EVENT, bump);
+    return () => {
+      window.removeEventListener(SITES_CHANGED_EVENT, bump);
+      window.removeEventListener(CRAWL_QUEUED_EVENT, bump);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/sites?pageSize=3&sort=recent", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("failed"))))
+      .then((data: { items?: RecentSite[] }) => {
+        if (cancelled) return;
+        setSites(data.items ?? []);
+        setFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, tick]);
+
+  if (failed && !sites) return null;
+  if (!sites) {
+    return (
+      <div className="ml-6 flex flex-col gap-1 py-1" aria-label="Loading recent sites">
+        {[0, 1, 2].map((row) => (
+          <span key={row} className="h-6 animate-pulse rounded-md bg-surface-soft motion-reduce:animate-none" />
+        ))}
+      </div>
+    );
+  }
+  if (sites.length === 0) return null;
+
+  return (
+    <ul aria-label="Recent sites" className="ml-4 flex flex-col gap-0.5 border-l border-hairline pl-2">
+      {sites.map((site) => {
+        const active = site.id === currentId;
+        return (
+          <li key={site.id}>
+            <Link
+              href={`/projects/${site.id}`}
+              aria-current={active ? "page" : undefined}
+              title={site.host}
+              className={cn(
+                "flex h-8 items-center gap-2 rounded-full px-2.5 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                active ? "bg-surface-card text-ink" : "text-muted-foreground hover:bg-surface-soft hover:text-ink",
+              )}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  site.status === "crawling" || site.status === "pending" || site.status === "discovering" ? "bg-primary" : site.status === "failed" ? "bg-bad" : "bg-muted-foreground/50",
+                )}
+              />
+              <span className="min-w-0 flex-1 truncate">{site.host}</span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+type Usage = {
+  label: string;
+  quota: {
+    daily: { used: number; limit: number | null; remaining: number | null };
+    weekly: { used: number; limit: number | null; remaining: number | null };
+  };
+};
+
+/** Free's AI allowance, and the way to more. Counts only; never tokens. */
+function AllowanceCard() {
+  const pathname = usePathname();
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setTick((value) => value + 1);
+    window.addEventListener(AI_USAGE_EVENT, bump);
+    window.addEventListener(AI_QUEUED_EVENT, bump);
+    return () => {
+      window.removeEventListener(AI_USAGE_EVENT, bump);
+      window.removeEventListener(AI_QUEUED_EVENT, bump);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/account/usage", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: Usage | null) => {
+        if (!cancelled && data) setUsage(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, tick]);
+
+  const daily = usage?.quota.daily;
+  const weekly = usage?.quota.weekly;
+
+  return (
+    <div className="rounded-2xl bg-surface-soft p-3.5 ring-1 ring-hairline">
+      <div className="flex items-start gap-2">
+        <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold leading-5 text-ink">AI recommendations</p>
+          {daily?.limit != null && weekly?.limit != null ? (
+            <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[11px] text-muted-soft">
+              <dt>Today</dt>
+              <dd className="text-right tabular-nums text-ink">
+                {daily.remaining} of {daily.limit} left
+              </dd>
+              <dt>This week</dt>
+              <dd className="text-right tabular-nums text-ink">
+                {weekly.remaining} of {weekly.limit} left
+              </dd>
+            </dl>
+          ) : (
+            <p className="mt-1 text-[11px] leading-4 text-muted-soft">For your homepage, a few each day.</p>
+          )}
+        </div>
+      </div>
+      <Link
+        href="/pricing"
+        className={cn(
+          "cursor-pointer flex mt-3 h-9 items-center justify-center rounded-full bg-primary px-3",
+          "text-[13px] font-semibold text-primary-foreground",
+          "hover:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
+        Upgrade for every page
+      </Link>
+    </div>
+  );
+}
+
 
 function WorkspaceSwitcher({ projectId }: { projectId: string }) {
   const pathname = usePathname();
@@ -507,31 +742,6 @@ function NavLink({
   );
 }
 
-function UpgradeCard() {
-  return (
-    <div className="rounded-2xl bg-surface-soft p-3.5 ring-1 ring-hairline">
-      <div className="flex items-start gap-2">
-        <Star className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden />
-        <div className="min-w-0">
-          <p className="text-[13px] font-semibold leading-5 text-ink">Upgrade to Pro</p>
-          <p className="mt-1 text-[11px] leading-4 text-muted-soft">
-            Unlock competitors, AI suggestions, and every page on your site.
-          </p>
-        </div>
-      </div>
-      <Link
-        href="/pricing"
-        className={cn(
-          "cursor-pointer flex mt-3 h-9 items-center justify-center rounded-full bg-primary px-3",
-          "text-[13px] font-semibold text-primary-foreground",
-          "hover:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        )}
-      >
-        View plans
-      </Link>
-    </div>
-  );
-}
 
 function ProfileFooter() {
   const { user, isLoaded } = useUser();

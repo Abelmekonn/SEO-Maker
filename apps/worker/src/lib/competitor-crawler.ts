@@ -2,18 +2,20 @@ import { assertSafeUrl, guardedLookup, safeFetch } from "@seo-maker/core/net";
 import { hostKey, normalizePageUrl } from "@seo-maker/core/crawl";
 import {
   type RobotsGroup,
+  type RobotsOutcome,
+  fetchRobotsTxt,
   groupFor,
   isPathDisallowed,
-  parseRobotsTxt,
 } from "@seo-maker/core/robots";
 import { parseSitemapXml } from "@seo-maker/core/sitemap";
-import { NON_CONTENT_SELECTOR, countWords, normalizeContent } from "@seo-maker/core/page";
+import { NON_CONTENT_SELECTOR, classifyPage, countWords, normalizeContent } from "@seo-maker/core/page";
 import {
   CheerioCrawler,
   type CheerioCrawlingContext,
   Configuration,
   NonRetryableError,
 } from "crawlee";
+import { schemaTypesOf } from "./extract.js";
 
 /**
  * Crawler for third-party competitor sites.
@@ -30,6 +32,10 @@ const DEFAULT_MAX_PAGES = 25;
  * shape rather than the first-party `PageAudit`. Keeping them separate is what
  * lets the first-party crawler grow its Phase 0 evidence fields without
  * dragging a third-party crawl into storing page bodies it has no use for.
+ *
+ * Headings, schema types and a page type were added for the competitor
+ * comparison (Phase 4.1): they say what a page is about and what it marks up,
+ * which is what a topic or structured-data gap is measured on. Still no body.
  */
 export type CompetitorPageAudit = {
   url: string;
@@ -48,6 +54,11 @@ export type CompetitorPageAudit = {
   schemaCount: number;
   indexable: boolean;
   xRobotsTag: string | null;
+  /** H2 and H3 texts, capped. */
+  headings: string[];
+  schemaTypes: string[];
+  /** Deterministic classification, as for your own pages. */
+  pageType: string | null;
 };
 
 export type RobotsRules = {
@@ -57,30 +68,40 @@ export type RobotsRules = {
   hasSitemap: boolean;
   /** Rules that apply to our user agent, already selected from the file. */
   group: RobotsGroup | null;
+  outcome: RobotsOutcome;
+  /** Why the file could not be used, when it could not. */
+  error: string | null;
 };
 
+/**
+ * robots.txt for a competitor, by RFC 9309 (see fetchRobotsTxt): redirects
+ * followed, a 4xx means no rules, and a 5xx or network failure means the
+ * site must be treated as closed. That last case stops the crawl: this is a
+ * site the user does not own, so it gets the strict reading.
+ */
 async function fetchRobots(origin: string): Promise<RobotsRules> {
-  const robotsTxtUrl = `${origin}/robots.txt`;
-  try {
-    const response = await safeFetch(robotsTxtUrl, {
-      allowAnyContentType: true,
-      timeoutMs: 10_000,
-      maxBytes: 512 * 1024,
-    });
-    if (response.status >= 400) {
-      return { robotsTxtUrl, robotsOk: false, sitemapUrl: null, hasSitemap: false, group: null };
-    }
-    const parsed = parseRobotsTxt(response.body);
+  const fetched = await fetchRobotsTxt(origin, { timeoutMs: 10_000 });
+  const robotsTxtUrl = fetched.finalUrl ?? fetched.url;
+  if (fetched.outcome !== "ok" || !fetched.parsed) {
     return {
       robotsTxtUrl,
-      robotsOk: true,
-      sitemapUrl: parsed.sitemaps[0] ?? `${origin}/sitemap.xml`,
-      hasSitemap: parsed.sitemaps.length > 0,
-      group: groupFor(parsed),
+      robotsOk: false,
+      sitemapUrl: null,
+      hasSitemap: false,
+      group: null,
+      outcome: fetched.outcome,
+      error: fetched.error,
     };
-  } catch {
-    return { robotsTxtUrl, robotsOk: false, sitemapUrl: null, hasSitemap: false, group: null };
   }
+  return {
+    robotsTxtUrl,
+    robotsOk: true,
+    sitemapUrl: fetched.parsed.sitemaps[0] ?? `${origin}/sitemap.xml`,
+    hasSitemap: fetched.parsed.sitemaps.length > 0,
+    group: groupFor(fetched.parsed),
+    outcome: "ok",
+    error: fetched.truncated ? fetched.error : null,
+  };
 }
 
 async function fetchSitemapUrls(sitemapUrl: string, siteHost: string, limit: number) {
@@ -129,6 +150,11 @@ export async function crawlCompetitor(
   const limit = Math.max(1, Math.min(maxPages, DEFAULT_MAX_PAGES));
   const startHost = hostKey(entry.url.hostname);
   const robots = await fetchRobots(entry.url.origin);
+  if (robots.outcome === "unreachable") {
+    throw new NonRetryableError(
+      `robots.txt could not be fetched (${robots.error ?? "no answer"}). Crawlers must treat the site as closed until it answers.`,
+    );
+  }
   const sitemapUrls = robots.sitemapUrl
     ? await fetchSitemapUrls(robots.sitemapUrl, startHost, limit)
     : [];
@@ -295,15 +321,36 @@ function extractAudit(
     }
   }
 
-  const schemaCount = $('script[type="application/ld+json"]')
+  const schemaScripts = $('script[type="application/ld+json"]')
     .toArray()
-    .filter((script) => $(script).text().trim().length > 0).length;
+    .filter((script) => $(script).text().trim().length > 0);
+  const schemaCount = schemaScripts.length;
+  const schemaTypes = [
+    ...new Set(
+      schemaScripts.flatMap((script) => {
+        try {
+          return schemaTypesOf(JSON.parse($(script).text()));
+        } catch {
+          return [];
+        }
+      }),
+    ),
+  ];
+
+  // Before the text is read: removing <svg> would also strip a heading that is
+  // an inline logo, exactly as on first-party pages.
+  const headings = $("h2, h3")
+    .toArray()
+    .map((node) => clean($(node).text()).slice(0, 200))
+    .filter(Boolean)
+    .slice(0, 30);
 
   // Read text last: this mutates the document. Without the removal, `.text()`
   // includes <script> bodies, which inflated competitor word counts the same
   // way it inflated our own and made every competitor look content-rich.
   $(NON_CONTENT_SELECTOR).remove();
   const content = normalizeContent($("body").text());
+  const wordCount = countWords(content);
 
   return {
     url: loadedUrl,
@@ -315,7 +362,7 @@ function extractAudit(
     h1: h1 || null,
     h2Count: $("h2").length,
     canonicalUrl,
-    wordCount: countWords(content),
+    wordCount,
     imageCount: images.length,
     // Same rule as our own pages: only an absent alt is missing; alt="" is decorative.
     missingAlt: images.filter((img) => $(img).attr("alt") == null).length,
@@ -323,5 +370,8 @@ function extractAudit(
     schemaCount,
     xRobotsTag,
     indexable: !noindex && (response?.statusCode ?? 0) < 400,
+    headings,
+    schemaTypes,
+    pageType: classifyPage({ url: loadedUrl, title, h1, schemaTypes, wordCount }).type,
   };
 }

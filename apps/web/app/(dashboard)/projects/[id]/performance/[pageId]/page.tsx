@@ -2,6 +2,7 @@ import { prisma, readPerfProgress } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { PerformancePageDetail } from "@/components/project/PerformancePageDetail";
+import { premiumGate } from "@/components/project/PremiumRoute";
 import { keyOfPage, latestAudits } from "@/lib/page-results";
 import { toAuditView } from "@/lib/perf-view";
 import { getPageForUser, requireUserId } from "@/lib/projects";
@@ -24,6 +25,10 @@ export default async function ProjectPerformancePageDetail({
   const page = await getPageForUser(id, pageId, userId);
   if (!page) {
     notFound();
+  }
+  const gate = await premiumGate(page.project.id, "performance");
+  if (gate) {
+    return gate;
   }
 
   // By URL, so a run from before the last crawl still shows here.

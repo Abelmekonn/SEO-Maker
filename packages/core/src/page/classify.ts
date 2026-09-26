@@ -22,6 +22,8 @@ export type PageType =
   | "contact"
   | "legal"
   | "landing"
+  /** Login, account, cart, checkout, search: pages that work, not pages people search for. */
+  | "utility"
   | "other";
 
 export type ClassifyInput = {
@@ -77,6 +79,7 @@ const WEAK_SCHEMA_TYPE: Record<string, PageType> = {
 /** First-path-segment patterns. Ordered: the first match wins. */
 const PATH_PATTERNS: Array<{ type: PageType; pattern: RegExp }> = [
   { type: "legal", pattern: /^\/(legal|terms|tos|privacy|policies|policy|gdpr|dpa|cookies?|imprint|impressum|licen[cs]es?|compliance|disclaimer)(\/|$)/i },
+  { type: "utility", pattern: /^\/(log-?in|log-?out|sign-?in|sign-?out|register|account|my-account|profile|dashboard|cart|basket|bag|checkout|wishlist|search|admin|wp-admin|wp-login\.php|auth|oauth|sso|password|forgot-password|reset-password)(\/|$)/i },
   { type: "pricing", pattern: /^\/(pricing|plans?|prices?|cost|quote)(\/|$)/i },
   { type: "contact", pattern: /^\/(contact|support|help-?desk|get-in-touch)(\/|$)/i },
   { type: "about", pattern: /^\/(about|about-us|company|team|careers?|jobs|mission|story)(\/|$)/i },

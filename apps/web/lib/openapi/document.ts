@@ -5,6 +5,7 @@ import { registry } from "./registry";
 // so they must run before `generateDocument` walks the registry.
 import "./schemas";
 import "./paths";
+import "./paths-ai";
 
 export function generateOpenApiDocument() {
   const generator = new OpenApiGeneratorV3(registry.definitions);

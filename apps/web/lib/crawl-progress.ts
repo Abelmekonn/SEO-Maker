@@ -53,6 +53,11 @@ export type CrawlProgress = {
     robotsFound: boolean;
     crawlDelay: number;
     concurrency: number;
+    /** Planned Priority / Standard pages. Null on crawls from before crawl tiers. */
+    priority: number | null;
+    standard: number | null;
+    priorityLimit: number | null;
+    blocked: number;
   } | null;
   recent: Array<{
     id: string;
@@ -156,6 +161,10 @@ export async function getCrawlProgress(project: {
       robotsFound: Boolean(plan.robotsFound),
       crawlDelay: Number(plan.crawlDelay) || 0,
       concurrency: Number(plan.concurrency) || 1,
+      priority: typeof plan.priority === "number" ? plan.priority : null,
+      standard: typeof plan.standard === "number" ? plan.standard : null,
+      priorityLimit: typeof plan.priorityLimit === "number" ? plan.priorityLimit : null,
+      blocked: Number(plan.blocked) || 0,
     };
   }
 

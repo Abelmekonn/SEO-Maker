@@ -46,6 +46,13 @@ export type FixPlanInput = {
   sitemapUrl?: string | null;
   /** Images with no alt attribute that carry a caption, nearby text or a filename. */
   describableMissingAlt: number;
+  /**
+   * Images with no alt attribute that an AI provider able to see images can
+   * look at: a fetchable address, and such a provider configured. 0 otherwise.
+   */
+  viewableMissingAlt?: number;
+  /** priority | standard. A Standard page has no captured text. */
+  crawlTier?: string | null;
   missingAlt?: number | null;
   /** Other pages the crawl found on this site, which are the only valid link targets. */
   knownUrlCount: number;
@@ -199,6 +206,13 @@ function planOne(checkId: string, input: FixPlanInput): Plan {
 
     case "images": {
       const missing = input.missingAlt ?? 0;
+      const viewable = input.viewableMissingAlt ?? 0;
+      if (viewable > 0) {
+        return generate(
+          "image-alt",
+          `${viewable} of ${missing} images can be shown to the AI, which describes them from the image itself. Every suggestion still needs a human check.`,
+        );
+      }
       if (input.describableMissingAlt > 0) {
         return generate(
           "image-alt",
@@ -241,6 +255,7 @@ export type FixPlanPage = {
   sitemapUrl?: string | null;
   missingAlt?: number | null;
   evidence?: unknown;
+  crawlTier?: string | null;
   issues: Array<{ checkId: string; status: string; severity: string }>;
 };
 
@@ -258,9 +273,24 @@ export function describableMissingAltImages(evidence: unknown): ImageEvidence[] 
   );
 }
 
+/**
+ * Images with no alt attribute whose address can be fetched, so a provider
+ * that sees images can be shown them. `alt=""` is decorative and never counts.
+ */
+export function viewableMissingAltImages(evidence: unknown): ImageEvidence[] {
+  const images = (evidence as { images?: ImageEvidence[] } | null)?.images ?? [];
+  return images.filter((image) => !image.decorative && !image.alt && /^https?:\/\//i.test(image.src));
+}
+
 /** Builds the routing input from a stored page, so the worker and the UI decide identically. */
-export function fixPlanInputFromPage(page: FixPlanPage, knownUrlCount: number): FixPlanInput {
+export function fixPlanInputFromPage(
+  page: FixPlanPage,
+  knownUrlCount: number,
+  options: { imageInput?: boolean } = {},
+): FixPlanInput {
   return {
+    crawlTier: page.crawlTier ?? null,
+    viewableMissingAlt: options.imageInput ? viewableMissingAltImages(page.evidence).length : 0,
     url: page.url,
     finalUrl: page.finalUrl,
     statusCode: page.statusCode,

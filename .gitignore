@@ -7,6 +7,8 @@ dist
 .env
 .env*.local
 apps/worker/storage
+# AI benchmark run reports. Commit a chosen baseline with `git add -f`.
+packages/ai/benchmark/results/
 graphify-out
 # The knowledge folder: ship what the code needs, keep the bulk out.
 # knowledge-corpus.json is a runtime dependency of packages/db/src/ingest-knowledge.ts,
@@ -18,5 +20,7 @@ knowledge/*
 !knowledge/build/
 knowledge/build/__pycache__/
 
+
+claude.md
 SEO_Maker_AI_4_Phase_Implementation_Plan.md
 SEO_Maker_AI_Architecture_and_Implementation.md

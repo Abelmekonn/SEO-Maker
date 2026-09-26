@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Check } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { pricingCompare, pricingTiers } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,12 @@ function CellValue({ value }: { value: string | boolean }) {
     );
   }
   if (value === false) {
-    return <span className="sr-only">Not included</span>;
+    return (
+      <span className="text-mkt-subtle">
+        <span aria-hidden>–</span>
+        <span className="sr-only">Not included</span>
+      </span>
+    );
   }
   return <span className="text-white">{value}</span>;
 }
@@ -70,6 +75,15 @@ export function HomePricing() {
                   >
                     <Check className="mt-0.5 size-4 shrink-0 text-white" aria-hidden />
                     {feature}
+                  </li>
+                ))}
+                {tier.excluded.map((feature) => (
+                  <li key={feature} className="flex items-start gap-2 text-sm text-mkt-subtle">
+                    <X className="mt-0.5 size-4 shrink-0" aria-hidden />
+                    <span>
+                      {feature}
+                      <span className="sr-only"> (not included)</span>
+                    </span>
                   </li>
                 ))}
               </ul>

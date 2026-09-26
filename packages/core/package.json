@@ -12,7 +12,10 @@
     "./crawl": "./src/crawl/index.ts",
     "./robots": "./src/robots/index.ts",
     "./sitemap": "./src/sitemap/index.ts",
-    "./page": "./src/page/index.ts"
+    "./page": "./src/page/index.ts",
+    "./site": "./src/site/index.ts",
+    "./plan": "./src/plan/index.ts",
+    "./quick": "./src/quick/index.ts"
   },
   "scripts": {
     "test": "vitest run",

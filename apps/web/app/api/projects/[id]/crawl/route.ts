@@ -1,13 +1,25 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@seo-maker/db";
+import { refundUsage, reserveSiteCrawl } from "@/lib/crawl-access";
 import { getCrawlProgress } from "@/lib/crawl-progress";
 import { getAccountForUser } from "@/lib/plan";
-import { getProjectForUser, requireUserId } from "@/lib/projects";
+import { requireUserId } from "@/lib/projects";
 import { enqueueHomepageCrawl, removeQueuedCrawl } from "@/lib/queue";
-import { findHomepage } from "@/lib/site-url";
+import { loadInventory } from "@/lib/site-inventory";
+import { siteKeyOf } from "@/lib/site-url";
 
 /**
- * Queues a re-crawl.
+ * Queues a crawl of pages the site's page inventory already holds.
+ *
+ * Body: { pages?: string[], scope?: "recrawl" | "new-pages" }
+ *
+ *   no pages   the inventory's Priority pages. A new site's first crawl is
+ *              this: "Start crawl — Priority pages".
+ *   pages      page keys chosen on the re-crawl screen, or the pages a check
+ *              for new pages just found (scope "new-pages").
+ *
+ * Pages are fetched at the tier they are classified at; nothing is
+ * discovered or re-classified here. Pages not chosen keep their last results.
  *
  * This used to null out every column on every page and set them back to
  * pending, so the moment a user pressed "Crawl again" the previous results
@@ -31,7 +43,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   return NextResponse.json(await getCrawlProgress(project));
 }
 
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "Sign in to run a crawl." }, { status: 401 });
@@ -39,7 +51,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const [project, account] = await Promise.all([
-    getProjectForUser(id, userId),
+    prisma.project.findFirst({ where: { id, userId } }),
     getAccountForUser(userId),
   ]);
 
@@ -53,10 +65,61 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (inFlight || project.status === "pending") {
     return NextResponse.json({ error: "A crawl is already running for this site." }, { status: 409 });
   }
+  if (project.discoveryStatus === "queued" || project.discoveryStatus === "running") {
+    return NextResponse.json(
+      { error: "This site's pages are being discovered. Crawl them when discovery finishes." },
+      { status: 409 },
+    );
+  }
 
-  const seed = findHomepage(project.pages, project.rootUrl);
-  const startUrl = seed?.url ?? project.rootUrl;
-  const maxPages = Math.max(project.maxPages, account.limits.maxPages);
+  const body = (await request.json().catch(() => ({}))) as { pages?: unknown; scope?: unknown };
+  if (body.pages !== undefined && (!Array.isArray(body.pages) || !body.pages.every((key) => typeof key === "string"))) {
+    return NextResponse.json({ error: "Send `pages` as a list of page keys." }, { status: 400 });
+  }
+  const chosen = Array.isArray(body.pages) ? [...new Set(body.pages as string[])] : null;
+  if (chosen && chosen.length === 0) {
+    return NextResponse.json({ error: "Choose at least one page to crawl." }, { status: 400 });
+  }
+
+  // Only pages the inventory holds can be crawled: this is not a way to fetch
+  // arbitrary URLs. The plan caps how many one crawl fetches.
+  const inventory = await loadInventory(project, account.limits);
+  const known = new Set(inventory.map((row) => row.pageKey));
+  if (chosen) {
+    const unknown = chosen.filter((key) => !known.has(key));
+    if (unknown.length > 0) {
+      return NextResponse.json(
+        { error: `Not a page of this site's inventory: ${unknown.slice(0, 3).join(", ")}` },
+        { status: 400 },
+      );
+    }
+    if (chosen.length > account.limits.maxPages) {
+      return NextResponse.json(
+        {
+          error: `${account.limits.label} crawls up to ${account.limits.maxPages} ${account.limits.maxPages === 1 ? "page" : "pages"} at a time. Choose fewer pages.`,
+          upgrade: account.plan === "free",
+        },
+        { status: 400 },
+      );
+    }
+  } else if (inventory.length > 0 && !inventory.some((row) => row.tier === "priority")) {
+    return NextResponse.json({ error: "No page is Priority. Make a page Priority, or choose pages to crawl." }, { status: 400 });
+  }
+
+  // Always from the site's root: robots.txt and the sitemaps are read there.
+  const startUrl = project.rootUrl;
+  const maxPages = account.limits.maxPages;
+
+  // A first crawl that never ran is not a re-crawl.
+  const scope = project.latestCrawlId ? "recrawl" : "initial";
+  const reservation = await reserveSiteCrawl({
+    userId,
+    account,
+    siteKey: project.siteKey ?? siteKeyOf(project.rootUrl),
+    projectId: project.id,
+    scope,
+  });
+  if (!reservation.ok) return reservation.response;
 
   await prisma.project.update({
     where: { id: project.id },
@@ -66,14 +129,17 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   try {
     await enqueueHomepageCrawl({
       projectId: project.id,
-      pageId: seed?.id ?? project.id,
       url: startUrl,
+      targets: chosen ?? undefined,
+      scope: scope === "initial" ? "initial" : body.scope === "new-pages" ? "new-pages" : "recrawl",
+      usageId: reservation.usageId,
     });
   } catch (error) {
     console.error("Failed to enqueue crawl", error);
+    await refundUsage([reservation.usageId], "could not queue");
     await prisma.project.update({
       where: { id: project.id },
-      data: { status: project.latestCrawlId ? "analyzed" : "pending" },
+      data: { status: project.status },
     });
     return NextResponse.json(
       { error: "Queue is not running. Start Redis and the worker." },
@@ -141,7 +207,10 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
   let removed = 0;
   try {
-    removed = await removeQueuedCrawl(project.id);
+    const result = await removeQueuedCrawl(project.id);
+    removed = result.removed;
+    // Stopped before it began: never charged.
+    await refundUsage(result.usageIds, "stopped before it started", "cancelled");
   } catch {
     return NextResponse.json({ error: "Queue is not running. Start Redis and the worker." }, { status: 503 });
   }
@@ -175,7 +244,8 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   });
   await prisma.project.update({
     where: { id: project.id },
-    data: { status: project.latestCrawlId ? "analyzed" : "cancelled" },
+    // A first crawl stopped before it began: the site is ready to crawl again.
+    data: { status: project.latestCrawlId ? "analyzed" : "discovered" },
   });
   return NextResponse.json({ ok: true, state: "stopped" });
 }
