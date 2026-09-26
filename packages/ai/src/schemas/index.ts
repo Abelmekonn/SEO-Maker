@@ -384,6 +384,34 @@ export const competitorInsightSchema = z.object({
 });
 export type CompetitorInsight = z.infer<typeof competitorInsightSchema>;
 
+// ---------------------------------------------------------------- search queries
+
+const lowerCase = (value: unknown) => (typeof value === "string" ? value.trim().toLowerCase() : value);
+
+/**
+ * Search queries a potential customer would make, generated from the
+ * business profile. A small set: the contract caps it, and the deterministic
+ * sanitizer (sanitizeSearchQueries in core) keeps at most 12 after removing
+ * duplicates, brand searches, keyword lists and stuffing. Navigational
+ * intent parses so it can be dropped with a reason rather than fail the
+ * whole answer. No volume, difficulty or ranking field exists to be invented.
+ */
+export const searchQueriesSchema = z.object({
+  ...base,
+  queries: z
+    .array(
+      z.object({
+        query: z.string().min(1).max(160),
+        intent: z.preprocess(lowerCase, z.enum(["commercial", "transactional", "informational", "navigational"])),
+        priority: z.preprocess(lowerCase, z.enum(["high", "medium", "low"])),
+        reason: z.string().min(1).max(400),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+export type SearchQueriesOutput = z.infer<typeof searchQueriesSchema>;
+
 // ---------------------------------------------------------------- registry
 
 import type { AiFeature } from "../config";
@@ -400,6 +428,7 @@ export const FEATURE_SCHEMAS = {
   "site-opportunity": siteOpportunitySchema,
   "site-strategy": siteStrategySchema,
   "competitor-insight": competitorInsightSchema,
+  "search-queries": searchQueriesSchema,
 } as const satisfies Record<AiFeature, z.ZodTypeAny>;
 
 export function schemaFor(feature: AiFeature) {

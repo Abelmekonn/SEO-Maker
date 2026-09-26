@@ -31,7 +31,8 @@ export type AiFeature =
   | "internal-link"
   | "site-opportunity"
   | "site-strategy"
-  | "competitor-insight";
+  | "competitor-insight"
+  | "search-queries";
 
 export type AiMode = "quick" | "deep";
 
@@ -273,6 +274,9 @@ export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   "site-strategy": "1.0.0",
   // 5.0.0: structural differences and opportunities.
   "competitor-insight": "5.0.0",
+  // Search queries from the business profile, for keyword suggestions and
+  // competitor discovery.
+  "search-queries": "1.0.0",
 };
 
 export function promptVersionFor(feature: AiFeature): string {

@@ -15,6 +15,8 @@ import {
   type SerpEvidence,
   aggregateContentGaps,
   compareWithCompetitor,
+  registrableDomain,
+  resultMatchesDomain,
 } from "@seo-maker/core/competitors";
 import { Prisma, prisma } from "@seo-maker/db";
 import { type LoadedSite, loadSiteIntelligence } from "../context/site";
@@ -44,11 +46,14 @@ export async function buildCompetitorComparison(
       select: { url: true, title: true, h1: true, wordCount: true, internalLinks: true, pageType: true, schema: true, headings: true },
     }),
     prisma.serpResult.findMany({
-      where: { domain: competitor.domain, query: { projectId: competitor.projectId } },
-      select: { position: true, query: { select: { query: true, selfPosition: true, searchVolume: true } } },
+      where: {
+        domain: { in: [...new Set([competitor.domain, registrableDomain(competitor.domain)])] },
+        query: { projectId: competitor.projectId, status: { not: "retired" } },
+      },
+      select: { position: true, url: true, query: { select: { query: true, selfPosition: true, searchVolume: true } } },
       orderBy: { position: "asc" },
     }),
-  ]);
+  ]).then(([pages, rows]) => [pages, rows.filter((row) => resultMatchesDomain(hostOf(row.url), competitor.domain))] as const);
 
   const competitorPages: CompetitorPageInput[] = pages.map((page) => ({
     url: page.url,
@@ -79,6 +84,14 @@ export async function buildCompetitorComparison(
     competitorPages,
     serp: [...bestByQuery.values()],
   });
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
 }
 
 /** Stores a comparison on the competitor's latest analysis row. */
