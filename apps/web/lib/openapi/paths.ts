@@ -353,6 +353,102 @@ registry.registerPath({
   },
 });
 
+const ProfileGap = z.object({
+  field: z.enum(["businessType", "targetLocation", "targetAudience", "servicesProducts", "businessDescription"]),
+  label: z.string(),
+  hint: z.string(),
+});
+
+const ProfileRequired = ErrorResponse.extend({
+  code: z.literal("profile-required"),
+  missing: z.array(ProfileGap).openapi({ description: "Business profile fields still needed, with a hint for each" }),
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/projects/{id}/competitors/discover",
+  tags: ["Competitors"],
+  summary: "Queue automatic discovery of the one strongest competitor",
+  description:
+    "Generates (or reuses) the project's search queries from its business profile, checks each search through the " +
+    "configured results provider, aggregates every domain across all searches, and selects the strongest recurring one. " +
+    "A competitor already tracked with a fresh crawl is reused, never crawled again; a new one has only its important " +
+    "pages crawled. Progress and the result are on the project row (compStatus, compPhase, compResult).",
+  ...auth,
+  request: { params: ProjectIdParam, body: jsonBody(z.object({ requestId: z.string().optional() })) },
+  responses: {
+    200: { description: "Already running, or a replayed request", ...jsonBody(QueueResponse) },
+    202: { description: "Queued", ...jsonBody(QueueResponse) },
+    401: { description: "Not signed in", ...jsonBody(ErrorResponse) },
+    402: { description: "Plan does not include Competitor AI", ...jsonBody(ErrorResponse) },
+    403: { description: "Plan does not include competitors", ...jsonBody(ErrorResponse) },
+    404: { description: "Project not found", ...jsonBody(ErrorResponse) },
+    409: { description: "No search results provider is configured (code no-provider)", ...jsonBody(ErrorResponse) },
+    422: { description: "The business profile is incomplete (code profile-required)", ...jsonBody(ProfileRequired) },
+    429: { description: "AI allowance or capacity used up", ...jsonBody(ErrorResponse) },
+    503: { description: "AI unavailable, or the queue is offline", ...jsonBody(ErrorResponse) },
+  },
+});
+
+const SearchKeyword = z.object({
+  id: z.string(),
+  query: z.string(),
+  intent: z.string().openapi({ description: "commercial | transactional | informational" }),
+  priority: z.string().nullable().openapi({ description: "high | medium | low" }),
+  reason: z.string().nullable(),
+  source: z.string().openapi({ description: "ai (generated) | manual (your target keywords)" }),
+  googleUrl: z.string().url().openapi({ description: "Google search for exactly this query, opened by the user" }),
+  checkedAt: z.string().datetime().nullable(),
+  selfPosition: z.number().int().nullable(),
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/projects/{id}/search-queries",
+  tags: ["Competitors"],
+  summary: "List the project's search keywords",
+  ...auth,
+  request: { params: ProjectIdParam },
+  responses: {
+    200: {
+      description: "OK",
+      ...jsonBody(
+        z.object({
+          keywords: z.array(SearchKeyword),
+          gaps: z.array(ProfileGap),
+          market: z.object({ country: z.string(), languageCode: z.string() }).nullable(),
+          generating: z.boolean(),
+        }),
+      ),
+    },
+    401: { description: "Not signed in", ...jsonBody(ErrorResponse) },
+    404: { description: "Project not found", ...jsonBody(ErrorResponse) },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/projects/{id}/search-queries",
+  tags: ["Competitors"],
+  summary: "Generate search keywords from the business profile",
+  description:
+    "Queues one generation on the Site AI queue: 5-12 searches a potential customer would make, validated by code " +
+    "(duplicates, brand searches, keyword lists and stuffing removed). Cached by the profile; `force` asks for a fresh set. " +
+    "Automatic discovery uses the same set.",
+  ...auth,
+  request: { params: ProjectIdParam, body: jsonBody(z.object({ force: z.boolean().optional(), requestId: z.string().optional() })) },
+  responses: {
+    200: { description: "Already generating, or a replayed request", ...jsonBody(QueueResponse) },
+    202: { description: "Queued", ...jsonBody(QueueResponse) },
+    401: { description: "Not signed in", ...jsonBody(ErrorResponse) },
+    402: { description: "Plan does not include Site AI", ...jsonBody(ErrorResponse) },
+    404: { description: "Project not found", ...jsonBody(ErrorResponse) },
+    422: { description: "The business profile is incomplete (code profile-required)", ...jsonBody(ProfileRequired) },
+    429: { description: "AI allowance or capacity used up", ...jsonBody(ErrorResponse) },
+    503: { description: "AI unavailable, or the queue is offline", ...jsonBody(ErrorResponse) },
+  },
+});
+
 // There is no GET /api/projects/{id}/competitors: the competitors list is
 // rendered by a server component reading Prisma directly (see
 // apps/web/app/(dashboard)/projects/[id]/competitors/page.tsx), not exposed

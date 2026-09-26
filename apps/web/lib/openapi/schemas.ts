@@ -84,7 +84,7 @@ const projectShape = z.object({
   perfTotal: z.number().int(),
   compStatus: z
     .string()
-    .openapi({ description: "idle | queued | discovering | analyzing | done | failed" }),
+    .openapi({ description: "idle | queued | running | done | failed (automatic competitor discovery)" }),
   businessName: z.string().nullable(),
   businessType: z.string().nullable(),
   industry: z.string().nullable(),

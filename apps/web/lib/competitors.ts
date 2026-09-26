@@ -1,4 +1,6 @@
-import { COMPETITOR_ACTIVE, deriveCompetitorView } from "@seo-maker/core/competitors";
+import { activeSearchQueries, loadProjectSearchContext } from "@seo-maker/ai";
+import { COMPETITOR_ACTIVE, type ProfileGap, deriveCompetitorView, googleSearchUrl } from "@seo-maker/core/competitors";
+import { serpProviderConfigured } from "@seo-maker/core/serp";
 import { prisma } from "@seo-maker/db";
 
 export { COMPETITOR_ACTIVE, deriveCompetitorView };
@@ -11,10 +13,10 @@ export const COMP_ACTIVE = new Set(["queued", "running"]);
  *
  * Read from env rather than the persisted `compProviderOk` flag, because that
  * flag only records what was true during the last run — this has to be right
- * before the first run too.
+ * before the first run too. Credentials never leave the server.
  */
 export function serpConfigured() {
-  return Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  return serpProviderConfigured();
 }
 
 export async function getCompetitorsForProject(projectId: string) {
@@ -56,4 +58,54 @@ export async function getCompetitorInsights(projectId: string) {
     }),
   ]);
   return { gaps, opportunities };
+}
+
+/** One of the project's search keywords, as the keyword list shows it. */
+export type SearchKeyword = {
+  id: string;
+  query: string;
+  intent: string;
+  priority: string | null;
+  reason: string | null;
+  source: string;
+  /** Opens this exact search on Google, in the user's own browser. */
+  googleUrl: string;
+  checkedAt: string | null;
+  /** Where your site appeared in the checked results, when it did. */
+  selfPosition: number | null;
+};
+
+export type SearchKeywordState = {
+  keywords: SearchKeyword[];
+  /** What the business profile still lacks before keywords can be generated. */
+  gaps: ProfileGap[];
+  market: { country: string; languageCode: string } | null;
+};
+
+/** The project's active search keywords for its market. */
+export async function getSearchKeywords(projectId: string): Promise<SearchKeywordState> {
+  const context = await loadProjectSearchContext(projectId);
+  if (!context) return { keywords: [], gaps: [], market: null };
+  const market = context.searchMarket;
+  const rows = market ? await activeSearchQueries(projectId, market) : [];
+  return {
+    gaps: context.gaps,
+    market: market ? { country: market.country.name, languageCode: market.languageCode } : null,
+    keywords: rows.map((row) => ({
+      id: row.id,
+      query: row.query,
+      intent: row.intent,
+      priority: row.priority,
+      reason: row.reason,
+      source: row.source,
+      googleUrl: googleSearchUrl(row.query),
+      checkedAt: row.checkedAt?.toISOString() ?? null,
+      selfPosition: row.selfPosition,
+    })),
+  };
+}
+
+/** Searches that count as evidence: the active set, not retired history. */
+export function activeQueryCount(projectId: string) {
+  return prisma.competitorQuery.count({ where: { projectId, status: { not: "retired" }, checkedAt: { not: null } } });
 }

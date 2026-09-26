@@ -1,6 +1,7 @@
 "use client";
 
-import type { SeoDimensionId } from "@seo-maker/core/scoring";
+import type { CompetitorFindings } from "@seo-maker/core/competitors";
+import type { SeoDimensionId, StoredConfidence } from "@seo-maker/core/scoring";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,6 +21,8 @@ export type CompetitorPageRow = {
   schemaCount: number | null;
   statusCode: number | null;
   seoScore: number | null;
+  /** Why this page was selected for the crawl. */
+  selectionReason: string | null;
 };
 
 export type CompetitorQueryRow = {
@@ -50,10 +53,9 @@ export function CompetitorDetail({
   initialTab,
   confidence,
   confidenceBand,
-  confidenceParts,
-  sharedQueries,
-  totalQueries,
-  avgPosition,
+  confidenceBreakdown,
+  findings,
+  searchNote,
   seoScore,
   dimensions,
   notMeasured,
@@ -64,7 +66,6 @@ export function CompetitorDetail({
   queries,
   summary,
   gapsPanel,
-  providerConfigured,
   lastAnalyzedAt,
 }: {
   projectId: string;
@@ -76,10 +77,11 @@ export function CompetitorDetail({
   initialTab: TabId;
   confidence: number | null;
   confidenceBand: string | null;
-  confidenceParts: Record<string, { raw: number; weight: number; points: number }> | null;
-  sharedQueries: number;
-  totalQueries: number;
-  avgPosition: number | null;
+  confidenceBreakdown: StoredConfidence | null;
+  /** Observed evidence and the opportunities it suggests, kept apart. */
+  findings: CompetitorFindings;
+  /** Why there are no search results to show, when there are none. */
+  searchNote: string | null;
   seoScore: number | null;
   dimensions: Partial<Record<SeoDimensionId, number | null>>;
   notMeasured: SeoDimensionId[];
@@ -91,7 +93,6 @@ export function CompetitorDetail({
   summary: string | null;
   /** The comparison and its interpretation, rendered on the server (Phase 4.1). */
   gapsPanel?: ReactNode;
-  providerConfigured: boolean;
   lastAnalyzedAt: string | null;
 }) {
   const router = useRouter();
@@ -194,18 +195,47 @@ export function CompetitorDetail({
           <CompetitorConfidenceCard
             score={confidence}
             band={confidenceBand}
-            parts={confidenceParts}
+            breakdown={confidenceBreakdown}
             domain={domain}
-            sharedQueries={sharedQueries}
-            totalQueries={totalQueries}
-            avgPosition={avgPosition}
+            status={status}
           />
-          {summary ? (
-            <section className="rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
-              <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
-                What we found
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-body">{summary}</p>
+          {findings.observed.length > 0 || findings.opportunities.length > 0 || summary ? (
+            <section className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
+              <div>
+                <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">Why {domain} is visible</h2>
+                <p className="mt-1 text-sm leading-6 text-body">
+                  What the checked searches and the crawl recorded, and, separately, what you could do about it. Nothing here
+                  says why search engines rank it, and nothing promises a ranking.
+                </p>
+              </div>
+              {findings.observed.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  <h3 className="font-mono text-[12px] text-muted-foreground">Observed</h3>
+                  <ul className="flex flex-col gap-1.5 text-sm leading-6 text-body">
+                    {findings.observed.map((row) => (
+                      <li key={row.text} className="flex gap-2">
+                        <span aria-hidden className="mt-2.5 size-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                        {row.text}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : summary ? (
+                <p className="text-sm leading-6 text-body">{summary}</p>
+              ) : null}
+              {findings.opportunities.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  <h3 className="font-mono text-[12px] text-muted-foreground">Opportunities (interpretation)</h3>
+                  <ul className="flex flex-col gap-1.5 text-sm leading-6 text-body">
+                    {findings.opportunities.map((row) => (
+                      <li key={row.factId} className="flex gap-2">
+                        <span aria-hidden className="mt-2.5 size-1.5 shrink-0 rounded-full bg-primary" />
+                        {row.text}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </section>
           ) : null}
           <CompetitorSeoBreakdown
@@ -227,14 +257,9 @@ export function CompetitorDetail({
               The searches that identified {domain} as a competitor, and where you rank on each.
             </p>
           </div>
-          {!providerConfigured ? (
+          {queries.length === 0 ? (
             <p className="text-sm leading-6 text-body">
-              Ranking data needs a configured search provider. Set DATAFORSEO_LOGIN and
-              DATAFORSEO_PASSWORD to collect it.
-            </p>
-          ) : queries.length === 0 ? (
-            <p className="text-sm leading-6 text-body">
-              No shared searches recorded yet. Run competitor discovery to collect them.
+              {searchNote ?? `${domain} did not appear in any of the searches checked.`}
             </p>
           ) : (
             <table className="w-full border-collapse text-left text-sm">
@@ -269,17 +294,24 @@ export function CompetitorDetail({
 
       {tab === "pages" ? (
         <section className="flex flex-col gap-4">
-          <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
-            Pages we analyzed
-          </h2>
+          <div>
+            <h2 className="font-display text-[18px] leading-6 tracking-[-0.3px] text-ink">
+              Pages we analyzed
+            </h2>
+            <p className="mt-1 text-sm text-body">
+              Only its most important pages: the homepage, pages that ranked in your searches, and its main service, product
+              and pricing pages. The whole site is never crawled.
+            </p>
+          </div>
           {pages.length === 0 ? (
             <p className="text-sm leading-6 text-body">No pages stored yet.</p>
           ) : (
             <div className="overflow-x-auto rounded-2xl bg-surface-soft ring-1 ring-hairline">
-              <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+              <table className="w-full min-w-[900px] border-collapse text-left text-sm">
                 <thead className="font-mono text-[12px] text-muted-foreground">
                   <tr>
                     <th scope="col" className="px-5 py-3.5 font-medium">URL</th>
+                    <th scope="col" className="px-5 py-3.5 font-medium">Why selected</th>
                     <th scope="col" className="px-5 py-3.5 font-medium">Title</th>
                     <th scope="col" className="px-5 py-3.5 font-medium">Words</th>
                     <th scope="col" className="px-5 py-3.5 font-medium">Links</th>
@@ -291,6 +323,11 @@ export function CompetitorDetail({
                     <tr key={page.id} className="border-t border-hairline">
                       <td className="max-w-[280px] px-5 py-4">
                         <p className="truncate font-mono text-ink">{page.url}</p>
+                      </td>
+                      <td className="max-w-[220px] px-5 py-4">
+                        <p className="truncate text-[12px] text-muted-foreground" title={page.selectionReason ?? undefined}>
+                          {page.selectionReason ?? "—"}
+                        </p>
                       </td>
                       <td className="max-w-[260px] px-5 py-4">
                         <p className="truncate text-body">{page.title ?? "—"}</p>

@@ -4,7 +4,9 @@ import { Globe, ShieldAlert } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/shell";
 import { BusinessContextForm } from "@/components/project/BusinessContextForm";
 import { DeleteProjectButton } from "@/components/project/DeleteProjectButton";
+import { SearchKeywordsSection } from "@/components/project/SearchKeywordsSection";
 import { contextCompleteness, readBusinessContext } from "@/lib/business-context";
+import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { normalizeSiteUrl } from "@/lib/site-url";
 
@@ -30,24 +32,28 @@ export default async function ProjectSettingsPage({
   const completeness = Math.round(contextCompleteness(context) * 100);
   const parsed = normalizeSiteUrl(project.rootUrl);
   const hostname = "hostname" in parsed ? parsed.hostname : project.name;
-  const [crawls, aiResults] = await Promise.all([
+  const [crawls, aiResults, account] = await Promise.all([
     prisma.crawl.count({ where: { projectId: project.id } }),
     prisma.aiResult.count({ where: { projectId: project.id, status: "ok" } }),
+    getAccountForUser(userId),
   ]);
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,340px)]">
-      <section className="flex flex-col gap-6 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline sm:p-8">
-        <PageHeader
-          title="Business context"
-          description={
-            project.analysisMode === "deep"
-              ? `AI uses your business context. It is ${completeness}% complete: the more you fill in, the more specific the recommendations can be.`
-              : "AI works from the crawl alone for this site. Add context here to make its recommendations specific to your business."
-          }
-        />
-        <BusinessContextForm projectId={project.id} initial={context} />
-      </section>
+      <div className="flex min-w-0 flex-col gap-4">
+        <section className="flex flex-col gap-6 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline sm:p-8">
+          <PageHeader
+            title="Business context"
+            description={
+              project.analysisMode === "deep"
+                ? `AI uses your business context. It is ${completeness}% complete: the more you fill in, the more specific the recommendations can be.`
+                : "AI works from the crawl alone for this site. Add context here to make its recommendations specific to your business."
+            }
+          />
+          <BusinessContextForm projectId={project.id} initial={context} />
+        </section>
+        <SearchKeywordsSection project={project} limits={account.limits} />
+      </div>
 
       <aside className="flex flex-col gap-4">
         <section className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">

@@ -1,11 +1,13 @@
-import { deriveCompetitorView } from "@seo-maker/core/competitors";
-import { type SeoDimensionId, weightedSeoScore } from "@seo-maker/core/scoring";
+import { deriveCompetitorView, discoveryProfileGaps, readDiscoveryResult, readSkippedPhases, resolveMarket } from "@seo-maker/core/competitors";
+import { planAllowsAi } from "@seo-maker/core/plan";
+import { type SeoDimensionId, readStoredConfidence, weightedSeoScore } from "@seo-maker/core/scoring";
 import { prisma, readCompetitorProgress } from "@seo-maker/db";
 import { ChevronRight, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { CompetitorAddForm } from "@/components/project/CompetitorAddForm";
 import { CompetitorConfidencePanel } from "@/components/project/CompetitorConfidencePanel";
+import { CompetitorDiscoveryResult } from "@/components/project/CompetitorDiscoveryResult";
 import { CompetitorDiscoveryStatus } from "@/components/project/CompetitorDiscoveryStatus";
 import { CompetitorEmptyState } from "@/components/project/CompetitorEmptyState";
 import { CompetitorFeatured } from "@/components/project/CompetitorFeatured";
@@ -17,17 +19,16 @@ import { CompetitorStatCards } from "@/components/project/CompetitorStatCards";
 import { CompetitorTable } from "@/components/project/CompetitorTable";
 import { ContentOpportunities } from "@/components/project/ContentOpportunities";
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
-import { getCompetitorsForProject, serpConfigured } from "@/lib/competitors";
+import { DiscoverCompetitorButton } from "@/components/project/DiscoverCompetitorButton";
+import { SearchKeywordsSection } from "@/components/project/SearchKeywordsSection";
+import { aiConfigured } from "@/lib/ai-access";
+import { readBusinessContext } from "@/lib/business-context";
+import { COMP_ACTIVE, activeQueryCount, getCompetitorsForProject, serpConfigured } from "@/lib/competitors";
 import { formatRelativeRun } from "@/lib/performance";
 import { premiumGate } from "@/components/project/PremiumRoute";
 import { getAccountForUser } from "@/lib/plan";
 import { getProjectForUser, requireUserId } from "@/lib/projects";
 import { normalizeSiteUrl } from "@/lib/site-url";
-
-function readParts(value: unknown) {
-  if (!value || typeof value !== "object") return null;
-  return value as Record<string, { raw: number; weight: number; points: number }>;
-}
 
 export default async function ProjectCompetitorsPage({
   params,
@@ -55,7 +56,7 @@ export default async function ProjectCompetitorsPage({
       getAccountForUser(userId),
       getCompetitorsForProject(project.id),
       readCompetitorProgress(prisma, project.id),
-      prisma.competitorQuery.count({ where: { projectId: project.id } }),
+      activeQueryCount(project.id),
       prisma.competitor.count({ where: { projectId: project.id } }),
       // Competitor gaps only: site opportunities share the table (Phase 3.3)
       // and have their own screen.
@@ -124,6 +125,30 @@ export default async function ProjectCompetitorsPage({
   ];
 
   const showDashboard = competitors.length > 0;
+  const discoveryResult = progress.compStatus === "done" ? readDiscoveryResult(progress.compResult) : null;
+  const discovering = COMP_ACTIVE.has(progress.compStatus);
+  const context = readBusinessContext(project);
+  const profileGaps = discoveryProfileGaps(
+    {
+      name: project.businessName ?? project.name,
+      businessType: project.businessType,
+      industry: project.industry,
+      businessDescription: project.businessDescription,
+      targetAudience: project.targetAudience,
+      targetLocation: project.targetLocation,
+      servicesProducts: context.servicesProducts,
+    },
+    resolveMarket(project.targetLocation),
+  );
+  const discoverDisabled = !planAllows
+    ? "Competitor tracking is available on the Pro and Agency plans."
+    : !planAllowsAi(account.limits, "competitor")
+      ? `${account.limits.label} does not include automatic discovery.`
+      : !providerConfigured
+        ? "Automatic discovery needs a configured search results provider."
+        : !aiConfigured()
+          ? "AI is not available right now, so search queries cannot be generated."
+          : undefined;
   const lastAnalysisLabel = progress.compRunAt
     ? formatRelativeRun(new Date(progress.compRunAt))
     : null;
@@ -159,13 +184,20 @@ export default async function ProjectCompetitorsPage({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-start gap-2">
           <span className="inline-flex flex-col rounded-lg bg-surface-soft px-3 py-1.5 ring-1 ring-hairline">
-            <span className="font-mono text-[10px] text-muted-soft">Last analysis</span>
+            <span className="font-mono text-[10px] text-muted-soft">Last discovery</span>
             <span className="font-mono text-[12px] text-ink">
               {lastAnalysisLabel ?? "Never"}
             </span>
           </span>
+          <DiscoverCompetitorButton
+            projectId={project.id}
+            context={context}
+            missing={profileGaps}
+            disabledReason={discoverDisabled}
+            running={discovering}
+          />
         </div>
       </header>
 
@@ -175,11 +207,12 @@ export default async function ProjectCompetitorsPage({
         status={progress.compStatus}
         phase={progress.compPhase}
         error={progress.compError}
-        done={progress.compDone}
-        total={progress.compTotal}
         phaseDone={progress.compPhaseDone}
         phaseTotal={progress.compPhaseTotal}
+        skipped={readSkippedPhases(progress.compResult)}
       />
+
+      {discoveryResult ? <CompetitorDiscoveryResult projectId={project.id} result={discoveryResult} /> : null}
 
       <CompetitorStatCards
         searchesAnalyzed={totalQueries}
@@ -226,6 +259,7 @@ export default async function ProjectCompetitorsPage({
             domain={featured?.domain ?? null}
             confidence={featured?.confidence ?? null}
             band={featured?.confidenceBand ?? null}
+            breakdown={featuredAnalysis ? readStoredConfidence(featuredAnalysis.confidenceParts) : null}
           />
         </div>
       ) : null}
@@ -258,7 +292,7 @@ export default async function ProjectCompetitorsPage({
           pageCount={featured.pageCount}
           avgWordCount={featuredAnalysis?.avgWordCount ?? null}
           schemaCoverage={featuredAnalysis?.schemaCoverage ?? null}
-          parts={readParts(featuredAnalysis?.confidenceParts)}
+          breakdown={readStoredConfidence(featuredAnalysis?.confidenceParts)}
           dimensions={{
             technical: featuredAnalysis?.technicalScore ?? null,
             onPage: featuredAnalysis?.onPageScore ?? null,
@@ -269,6 +303,8 @@ export default async function ProjectCompetitorsPage({
           }}
         />
       ) : null}
+
+      <SearchKeywordsSection project={project} limits={account.limits} compact />
 
       <CompetitorAddForm
         projectId={project.id}

@@ -1,15 +1,7 @@
-import {
-  CONFIDENCE_PART_LABELS,
-  type ConfidencePartId,
-  type SeoDimensionId,
-  seoScoreBand,
-  seoScoreBandLabels,
-} from "@seo-maker/core/scoring";
+import { type SeoDimensionId, type StoredConfidence, seoScoreBand, seoScoreBandLabels } from "@seo-maker/core/scoring";
 import { Check, Minus } from "lucide-react";
 import Link from "next/link";
 import { CompetitorGauge } from "@/components/project/CompetitorGauge";
-
-type Part = { raw: number; weight: number; points: number };
 
 /**
  * The single strongest competitor, with the evidence behind its confidence
@@ -25,7 +17,7 @@ export function CompetitorFeatured({
   pageCount,
   avgWordCount,
   schemaCoverage,
-  parts,
+  breakdown,
   dimensions,
 }: {
   projectId: string;
@@ -36,21 +28,14 @@ export function CompetitorFeatured({
   pageCount: number;
   avgWordCount: number | null;
   schemaCoverage: number | null;
-  parts: Partial<Record<ConfidencePartId, Part>> | null;
+  breakdown: StoredConfidence | null;
   dimensions: Partial<Record<SeoDimensionId, number | null>>;
 }) {
   const band = seoScore == null ? null : seoScoreBand(seoScore);
 
-  const evidence = parts
-    ? (Object.keys(CONFIDENCE_PART_LABELS) as ConfidencePartId[]).map((id) => ({
-        id,
-        label: CONFIDENCE_PART_LABELS[id],
-        part: parts[id],
-      }))
-    : [];
-
-  const measured = evidence.filter((row) => row.part && row.part.weight > 0);
-  const unmeasured = evidence.filter((row) => !row.part || row.part.weight === 0);
+  const signals = breakdown?.signals ?? [];
+  const measured = signals.filter((signal) => signal.measured);
+  const unmeasured = signals.filter((signal) => !signal.measured);
 
   return (
     <section className="grid gap-5 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)]">
@@ -111,8 +96,7 @@ export function CompetitorFeatured({
         <p className="font-mono text-[12px] text-muted-foreground">Why they are a competitor</p>
         {measured.length === 0 ? (
           <p className="text-sm leading-6 text-body">
-            We have not collected search evidence for this domain yet. Run discovery with a search
-            provider configured to measure how often you compete for the same queries.
+            {breakdown?.reason ?? "No confidence signal has been measured for this domain yet. Analyze it again to measure it."}
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
@@ -122,7 +106,7 @@ export function CompetitorFeatured({
                 <span className="text-body">
                   {row.label}
                   <span className="ml-1 font-mono text-[12px] tabular-nums text-ink">
-                    {Math.round((row.part?.raw ?? 0) * 100)}%
+                    {Math.round((row.score ?? 0) * 100)}%
                   </span>
                 </span>
               </li>
@@ -133,9 +117,11 @@ export function CompetitorFeatured({
         {unmeasured.length > 0 ? (
           <ul className="flex flex-col gap-1.5 border-t border-hairline pt-3">
             {unmeasured.map((row) => (
-              <li key={row.id} className="flex items-start gap-2 text-[12px] text-muted-soft">
+              <li key={row.id} className="flex items-start gap-2 text-[12px] text-muted-soft" title={row.reason ?? undefined}>
                 <Minus className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                {row.label} — not measured
+                <span>
+                  {row.label}: not measured. {row.reason}
+                </span>
               </li>
             ))}
           </ul>

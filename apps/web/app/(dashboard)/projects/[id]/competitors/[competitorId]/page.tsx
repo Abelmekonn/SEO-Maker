@@ -1,7 +1,13 @@
-import { buildCompetitorComparison, loadSiteIntelligence, saveComparison } from "@seo-maker/ai";
+import {
+  buildCompetitorComparison,
+  getCompetitorSearchEvidence,
+  loadSiteIntelligence,
+  readPageRaw,
+  saveComparison,
+} from "@seo-maker/ai";
 import { competitorInsightSchema } from "@seo-maker/ai/schemas";
-import type { CompetitorComparison } from "@seo-maker/core/competitors";
-import { type SeoDimensionId, weightedSeoScore } from "@seo-maker/core/scoring";
+import { type CompetitorComparison, competitorPolicy, describeCompetitorFindings } from "@seo-maker/core/competitors";
+import { type SeoDimensionId, readStoredConfidence, weightedSeoScore } from "@seo-maker/core/scoring";
 import { prisma } from "@seo-maker/db";
 import { notFound, redirect } from "next/navigation";
 import { CompetitorDetail } from "@/components/project/CompetitorDetail";
@@ -10,7 +16,7 @@ import { CompetitorInsightButton } from "@/components/project/CompetitorInsightB
 import { CrawlRefresh } from "@/components/project/CrawlRefresh";
 import { premiumGate } from "@/components/project/PremiumRoute";
 import { aiConfigured } from "@/lib/ai-results";
-import { getCompetitorForUser, serpConfigured } from "@/lib/competitors";
+import { getCompetitorForUser } from "@/lib/competitors";
 import { getAccountForUser } from "@/lib/plan";
 import { latestPagesForProject, requireUserId } from "@/lib/projects";
 import { getAiCompetitorJobs } from "@/lib/queue";
@@ -20,11 +26,6 @@ type TabId = (typeof TABS)[number];
 
 function readTab(value: string | undefined): TabId {
   return TABS.includes(value as TabId) ? (value as TabId) : "overview";
-}
-
-function readParts(value: unknown) {
-  if (!value || typeof value !== "object") return null;
-  return value as Record<string, { raw: number; weight: number; points: number }>;
 }
 
 function readComparison(value: unknown): CompetitorComparison | null {
@@ -60,20 +61,22 @@ export default async function CompetitorDetailPage({
     notFound();
   }
 
-  const [pages, selfPages, serpRows, totalQueries] = await Promise.all([
+  const policy = competitorPolicy();
+  const [pages, selfPages, search] = await Promise.all([
     prisma.competitorPage.findMany({
       where: { competitorId: competitor.id },
-      orderBy: { wordCount: "desc" },
+      orderBy: { createdAt: "asc" },
       take: 100,
     }),
     latestPagesForProject(id),
-    prisma.serpResult.findMany({
-      where: { domain: competitor.domain, query: { projectId: id } },
-      include: { query: true },
-      orderBy: { position: "asc" },
-      take: 50,
+    // What is stored; nothing is fetched while the page renders.
+    getCompetitorSearchEvidence({
+      projectId: id,
+      competitorDomain: competitor.domain,
+      refresh: false,
+      ttlHours: policy.serpTtlHours,
+      depth: policy.serpDepth,
     }),
-    prisma.competitorQuery.count({ where: { projectId: id } }),
   ]);
 
   const analysis = competitor.analyses[0] ?? null;
@@ -111,6 +114,22 @@ export default async function CompetitorDetailPage({
           ? "There are no observed differences to interpret yet."
           : undefined;
 
+  const findings = describeCompetitorFindings({
+    domain: competitor.domain,
+    search: search.summary,
+    pages: pages.map((page) => ({
+      url: page.url,
+      pageType: page.pageType,
+      indexable: page.indexable,
+      schemaTypes: Array.isArray(page.schema) ? page.schema.filter((type): type is string => typeof type === "string") : [],
+    })),
+    comparison,
+  });
+  const summary = search.summary;
+  const searchNote =
+    search.unavailableReason ??
+    (summary && summary.appearanceCount === 0 ? `${competitor.domain} did not appear in any of the ${summary.queriesChecked} searches checked.` : null);
+
   return (
     <>
       <CrawlRefresh status={competitor.status} intervalMs={3000} />
@@ -125,10 +144,9 @@ export default async function CompetitorDetailPage({
         initialTab={readTab(tab)}
         confidence={competitor.confidence}
         confidenceBand={competitor.confidenceBand}
-        confidenceParts={readParts(analysis?.confidenceParts)}
-        sharedQueries={new Set(serpRows.map((row) => row.queryId)).size}
-        totalQueries={totalQueries}
-        avgPosition={competitor.avgPosition}
+        confidenceBreakdown={readStoredConfidence(analysis?.confidenceParts)}
+        findings={findings}
+        searchNote={searchNote}
         seoScore={competitor.seoScore}
         dimensions={{
           technical: analysis?.technicalScore ?? null,
@@ -152,12 +170,13 @@ export default async function CompetitorDetailPage({
           schemaCount: page.schemaCount,
           statusCode: page.statusCode,
           seoScore: page.seoScore,
+          selectionReason: readPageRaw(page.rawData).selection?.reason ?? null,
         }))}
-        queries={serpRows.map((row) => ({
-          query: row.query.query,
+        queries={(summary?.rows ?? []).map((row) => ({
+          query: row.query,
           position: row.position,
           url: row.url,
-          selfPosition: row.query.selfPosition,
+          selfPosition: row.selfPosition,
         }))}
         summary={analysis?.summary ?? null}
         gapsPanel={
@@ -177,7 +196,6 @@ export default async function CompetitorDetailPage({
             }
           />
         }
-        providerConfigured={serpConfigured()}
         lastAnalyzedAt={
           competitor.lastAnalyzedAt ? competitor.lastAnalyzedAt.toLocaleString() : null
         }

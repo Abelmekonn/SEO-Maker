@@ -7,12 +7,12 @@ const COPY: Partial<
   "not-analyzed": {
     icon: Swords,
     title: "Find out who you are competing with",
-    body: "Run discovery to see which sites show up for the searches your pages target, how strongly they compete, and where the gaps are.",
+    body: "Press Discover Competitor to find the site that shows up most in the searches your customers make, measure how strongly it competes, and see where the gaps are. Or add a competitor you already know below.",
   },
   "no-results": {
     icon: Search,
-    title: "No strong competitors found",
-    body: "We analyzed your searches but no domain met the confidence threshold. Try adding a competitor you know about directly.",
+    title: "No competitor found",
+    body: "No domain recurred across your searches often enough to count as a competitor. Try regenerating your search keywords, or add a competitor you know about directly.",
   },
   "no-provider": {
     icon: Lock,

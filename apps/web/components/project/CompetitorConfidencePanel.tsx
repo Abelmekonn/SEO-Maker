@@ -1,4 +1,4 @@
-import { type ConfidenceBand, confidenceBandLabels } from "@seo-maker/core/scoring";
+import { type ConfidenceBand, type StoredConfidence, confidenceBandLabels } from "@seo-maker/core/scoring";
 import { Info } from "lucide-react";
 import Link from "next/link";
 import { CompetitorGauge } from "@/components/project/CompetitorGauge";
@@ -13,14 +13,17 @@ export function CompetitorConfidencePanel({
   domain,
   confidence,
   band,
+  breakdown,
 }: {
   projectId: string;
   competitorId: string | null;
   domain: string | null;
   confidence: number | null;
   band: string | null;
+  breakdown: StoredConfidence | null;
 }) {
   const typedBand = (band ?? null) as ConfidenceBand | null;
+  const searchSignal = breakdown?.signals.find((signal) => signal.id === "queryCoverage");
 
   return (
     <section className="flex flex-col gap-4 rounded-xl bg-surface-soft p-5 ring-1 ring-hairline">
@@ -40,18 +43,24 @@ export function CompetitorConfidencePanel({
         {domain ? (
           <p className="text-center font-mono text-[12px] text-muted-foreground">{domain}</p>
         ) : null}
+        {breakdown ? (
+          <p className="text-center font-mono text-[12px] text-muted-foreground">
+            Signals measured {breakdown.measuredSignalCount} of {breakdown.totalSignalCount}
+          </p>
+        ) : null}
       </div>
 
       <p className="text-sm leading-6 text-body">
-        Measures how strongly this domain competes with your website, based on shared search
-        queries, ranking positions, topical relevance and business similarity.
+        Measures how strongly this domain competes with your website, from shared searches, observed
+        positions, search relevance, business similarity and market overlap.
       </p>
 
-      {confidence == null ? (
+      {confidence == null && breakdown?.reason ? (
+        <p className="rounded-lg bg-canvas p-3 text-[12px] leading-5 text-muted-soft ring-1 ring-hairline">{breakdown.reason}</p>
+      ) : null}
+      {confidence != null && breakdown?.basis === "business" && searchSignal?.reason ? (
         <p className="rounded-lg bg-canvas p-3 text-[12px] leading-5 text-muted-soft ring-1 ring-hairline">
-          Confidence needs search evidence. Adding a competitor by hand records who you compete
-          with, but not how often you appear for the same queries — run discovery with a search
-          provider to measure that.
+          Based on business and market evidence. Search overlap is not measured: {searchSignal.reason}
         </p>
       ) : null}
 
