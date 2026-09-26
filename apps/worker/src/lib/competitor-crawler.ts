@@ -1,3 +1,4 @@
+import { type SelectedPage, selectCompetitorPages } from "@seo-maker/core/competitors";
 import { assertSafeUrl, guardedLookup, safeFetch } from "@seo-maker/core/net";
 import { hostKey, normalizePageUrl } from "@seo-maker/core/crawl";
 import {
@@ -21,11 +22,22 @@ import { schemaTypesOf } from "./extract.js";
  * Crawler for third-party competitor sites.
  *
  * Deliberately a fork of `crawlSite` rather than a flag on it: this one reaches
- * hosts the user supplied, so it enforces SSRF rules and robots.txt Disallow,
- * and a mistake here must not be able to regress the first-party crawl.
+ * hosts the user supplied or search results named, so it enforces SSRF rules
+ * and robots.txt Disallow, and a mistake here must not be able to regress the
+ * first-party crawl.
+ *
+ * It never crawls a whole site. The homepage is fetched first; its links, the
+ * sitemap and the competitor's pages that ranked in your searches are then
+ * ranked by selectCompetitorPages, and only the chosen few are fetched. No
+ * link is followed beyond them.
  */
 
-const DEFAULT_MAX_PAGES = 25;
+/** Hard ceiling, whatever the policy says. */
+const MAX_PAGES = 15;
+/** Sitemap URLs read as candidates; none is fetched unless selected. */
+const SITEMAP_CANDIDATES = 500;
+/** Homepage links read as candidates. */
+const MAX_LINKS = 300;
 
 /**
  * Competitor pages only need the comparison fields, so this stays a narrow
@@ -35,7 +47,8 @@ const DEFAULT_MAX_PAGES = 25;
  *
  * Headings, schema types and a page type were added for the competitor
  * comparison (Phase 4.1): they say what a page is about and what it marks up,
- * which is what a topic or structured-data gap is measured on. Still no body.
+ * which is what a topic or structured-data gap is measured on. Language,
+ * hreflang and address countries say which market it serves. Still no body.
  */
 export type CompetitorPageAudit = {
   url: string;
@@ -59,6 +72,12 @@ export type CompetitorPageAudit = {
   schemaTypes: string[];
   /** Deterministic classification, as for your own pages. */
   pageType: string | null;
+  /** <html lang>, for the market it serves. */
+  language: string | null;
+  /** hreflang alternates: the regional versions it publishes. */
+  hreflang: string[];
+  /** addressCountry values from its JSON-LD. */
+  addressCountries: string[];
 };
 
 export type RobotsRules = {
@@ -132,13 +151,22 @@ export type CompetitorCrawlResult = {
   pages: CompetitorPageAudit[];
   robots: RobotsRules;
   blockedByRobots: number;
+  /** The pages chosen, with why, homepage first. */
+  selection: SelectedPage[];
 };
 
-export async function crawlCompetitor(
-  domain: string,
-  maxPages = DEFAULT_MAX_PAGES,
-  hooks?: { onPage?: (audit: CompetitorPageAudit) => Promise<void> },
-): Promise<CompetitorCrawlResult> {
+export type CompetitorCrawlOptions = {
+  /** Pages to fetch, homepage included. */
+  limit: number;
+  /** The competitor's results in your searches: its most relevant pages. */
+  serp: Array<{ url: string; query: string; position: number }>;
+  /** Words of your searches and business, to rank its other pages. */
+  terms: ReadonlySet<string>;
+  onSelection?: (selection: SelectedPage[]) => Promise<void>;
+  onPage?: (audit: CompetitorPageAudit, selection: SelectedPage) => Promise<void>;
+};
+
+export async function crawlCompetitor(domain: string, options: CompetitorCrawlOptions): Promise<CompetitorCrawlResult> {
   const origin = `https://${hostKey(domain)}`;
 
   // Layer 0: never even start on a host that fails the SSRF rules.
@@ -147,7 +175,7 @@ export async function crawlCompetitor(
     throw new NonRetryableError(`Blocked competitor URL (${entry.reason})`);
   }
 
-  const limit = Math.max(1, Math.min(maxPages, DEFAULT_MAX_PAGES));
+  const limit = Math.max(1, Math.min(options.limit, MAX_PAGES));
   const startHost = hostKey(entry.url.hostname);
   const robots = await fetchRobots(entry.url.origin);
   if (robots.outcome === "unreachable") {
@@ -155,37 +183,51 @@ export async function crawlCompetitor(
       `robots.txt could not be fetched (${robots.error ?? "no answer"}). Crawlers must treat the site as closed until it answers.`,
     );
   }
-  const sitemapUrls = robots.sitemapUrl
-    ? await fetchSitemapUrls(robots.sitemapUrl, startHost, limit)
-    : [];
-
-  const seeds = [...new Set([entry.url.toString(), ...sitemapUrls])]
-    .filter((url) => {
-      try {
-        return !isPathDisallowed(new URL(url).pathname, robots.group);
-      } catch {
-        return false;
-      }
-    })
-    .slice(0, limit);
-
-  if (seeds.length === 0) {
+  const allowed = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      return /^https?:$/.test(parsed.protocol) && !isPathDisallowed(parsed.pathname, robots.group);
+    } catch {
+      return false;
+    }
+  };
+  const homeUrl = entry.url.toString();
+  if (!allowed(homeUrl)) {
     throw new NonRetryableError("robots.txt disallows crawling this site.");
   }
+  const sitemap = robots.sitemapUrl ? (await fetchSitemapUrls(robots.sitemapUrl, startHost, SITEMAP_CANDIDATES)).filter(allowed) : [];
+  const serp = options.serp.filter((row) => allowed(row.url));
 
   const pages: CompetitorPageAudit[] = [];
   const seen = new Set<string>();
   let blockedByRobots = 0;
+  let selection: SelectedPage[] = [];
+  let selected = false;
 
-  const crawler = new CheerioCrawler(
+  // Declared before the crawler so the handlers below can queue into it.
+  let crawler: CheerioCrawler | null = null;
+
+  /** Chooses the pages once the homepage is in (or failed), and queues them. */
+  const select = async (homepageUrl: string, links: Array<{ url: string; anchor: string }>) => {
+    if (selected) return;
+    selected = true;
+    selection = selectCompetitorPages({ homepageUrl, serp, links, sitemap, terms: options.terms, limit }).filter((page) => allowed(page.url));
+    await options.onSelection?.(selection);
+    const rest = selection.slice(1);
+    if (rest.length > 0 && crawler) {
+      await crawler.addRequests(rest.map((page) => ({ url: page.url, uniqueKey: page.url, userData: { selection: page } })));
+    }
+  };
+
+  crawler = new CheerioCrawler(
     {
       maxRequestsPerCrawl: limit,
       maxConcurrency: 1,
       maxRequestRetries: 1,
-      requestHandlerTimeoutSecs: 20,
+      requestHandlerTimeoutSecs: 30,
       preNavigationHooks: [
         async ({ request }, gotOptions) => {
-          // Layer 1: validate every hop, including links enqueueLinks found.
+          // Layer 1: validate every request before it is made.
           const check = await assertSafeUrl(request.url);
           if (!check.ok) {
             throw new NonRetryableError(`Blocked URL (${check.reason})`);
@@ -216,68 +258,77 @@ export async function crawlCompetitor(
           }
         },
       ],
-      async requestHandler({ $, request, response, enqueueLinks }) {
+      async requestHandler({ $, request, response }) {
+        const isHome = request.userData?.home === true;
         const loadedUrl = normalizePageUrl(request.loadedUrl ?? request.url) ?? request.url;
-        if (seen.has(loadedUrl)) return;
+        if (seen.has(loadedUrl)) {
+          if (isHome) await select(loadedUrl, []);
+          return;
+        }
         seen.add(loadedUrl);
 
         const loaded = new URL(loadedUrl);
         if (isPathDisallowed(loaded.pathname, robots.group)) {
           blockedByRobots += 1;
+          if (isHome) await select(loadedUrl, []);
           return;
         }
 
-        const audit = extractAudit($, loadedUrl, loaded, response);
+        const { audit, links } = extractAudit($, loadedUrl, loaded, response);
         pages.push(audit);
-        if (hooks?.onPage) {
-          await hooks.onPage(audit);
+        if (isHome) {
+          await select(loadedUrl, links);
+          await options.onPage?.(audit, selection[0] ?? { url: loadedUrl, source: "homepage", reason: "Homepage", pageType: "homepage", score: 1 });
+          return;
         }
-
-        if (limit > 1) {
-          await enqueueLinks({
-            strategy: "same-domain",
-            transformRequestFunction: (req) => {
-              const next = normalizePageUrl(req.url);
-              if (!next || seen.has(next)) return false;
-              try {
-                const url = new URL(next);
-                if (hostKey(url.hostname) !== startHost) return false;
-                if (isPathDisallowed(url.pathname, robots.group)) return false;
-              } catch {
-                return false;
-              }
-              req.url = next;
-              req.uniqueKey = next;
-              return req;
-            },
-          });
-        }
+        const chosen = request.userData?.selection as SelectedPage | undefined;
+        await options.onPage?.(audit, chosen ?? { url: loadedUrl, source: "link", reason: "Selected page", pageType: audit.pageType, score: 0 });
       },
-      failedRequestHandler({ request }) {
+      async failedRequestHandler({ request }) {
         console.error(`[competitor-crawl] failed ${request.url}`);
+        // Without its homepage, still analyze the pages search results and
+        // the sitemap point to.
+        if (request.userData?.home === true) await select(homeUrl, []);
       },
     },
     new Configuration({ persistStorage: false, systemInfoV2: false }),
   );
 
-  await crawler.run(seeds.map((url) => ({ url, uniqueKey: url })));
+  await crawler.run([{ url: homeUrl, uniqueKey: homeUrl, userData: { home: true } }]);
 
   if (pages.length === 0) {
     throw new NonRetryableError(`Could not fetch any pages from ${domain}`);
   }
 
-  return { pages, robots, blockedByRobots };
+  return { pages, robots, blockedByRobots, selection };
 }
 
 /** Cheerio's API as crawlee hands it to us, without depending on cheerio directly. */
 type CheerioApi = CheerioCrawlingContext["$"];
+
+/** addressCountry values anywhere in a JSON-LD block, e.g. a PostalAddress. */
+function addressCountriesOf(value: unknown, depth = 0): string[] {
+  if (depth > 8 || value == null || typeof value !== "object") return [];
+  if (Array.isArray(value)) return value.flatMap((item) => addressCountriesOf(item, depth + 1));
+  const record = value as Record<string, unknown>;
+  const found: string[] = [];
+  const country = record.addressCountry;
+  if (typeof country === "string" && country.trim()) found.push(country.trim().slice(0, 60));
+  if (country && typeof country === "object" && typeof (country as Record<string, unknown>).name === "string") {
+    found.push(String((country as Record<string, unknown>).name).trim().slice(0, 60));
+  }
+  for (const [key, nested] of Object.entries(record)) {
+    if (key !== "addressCountry" && nested && typeof nested === "object") found.push(...addressCountriesOf(nested, depth + 1));
+  }
+  return found;
+}
 
 function extractAudit(
   $: CheerioApi,
   loadedUrl: string,
   loaded: URL,
   response: { statusCode?: number; headers?: Record<string, unknown> } | undefined,
-): CompetitorPageAudit {
+): { audit: CompetitorPageAudit; links: Array<{ url: string; anchor: string }> } {
   const clean = (value: string | undefined) => (value ?? "").replace(/\s+/g, " ").trim();
 
   const title = clean($("title").first().text());
@@ -296,21 +347,30 @@ function extractAudit(
     robotsMeta.includes("noindex") || (xRobotsTag ? xRobotsTag.includes("noindex") : false);
 
   const originHost = hostKey(loaded.hostname);
-  const internalLinks = $("a[href]")
-    .toArray()
-    .map((anchor) => $(anchor).attr("href"))
-    .reduce((count, href) => {
-      if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) {
-        return count;
-      }
-      try {
-        const target = normalizePageUrl(new URL(href, loaded).toString());
-        if (!target) return count;
-        return hostKey(new URL(target).hostname) === originHost ? count + 1 : count;
-      } catch {
-        return count;
-      }
-    }, 0);
+  const links: Array<{ url: string; anchor: string }> = [];
+  let internalLinks = 0;
+  for (const anchor of $("a[href]").toArray()) {
+    const href = $(anchor).attr("href");
+    if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) continue;
+    try {
+      const target = normalizePageUrl(new URL(href, loaded).toString());
+      if (!target || hostKey(new URL(target).hostname) !== originHost) continue;
+      internalLinks += 1;
+      if (links.length < MAX_LINKS) links.push({ url: target, anchor: clean($(anchor).text()).slice(0, 120) });
+    } catch {
+      // Not a usable link.
+    }
+  }
+
+  const language = clean($("html").attr("lang")) || clean($('meta[http-equiv="content-language"]').attr("content")) || null;
+  const hreflang = [
+    ...new Set(
+      $('link[rel="alternate"][hreflang]')
+        .toArray()
+        .map((node) => clean($(node).attr("hreflang")))
+        .filter((value) => value && value.toLowerCase() !== "x-default"),
+    ),
+  ].slice(0, 60);
 
   let canonicalUrl: string | null = null;
   if (canonical) {
@@ -325,17 +385,15 @@ function extractAudit(
     .toArray()
     .filter((script) => $(script).text().trim().length > 0);
   const schemaCount = schemaScripts.length;
-  const schemaTypes = [
-    ...new Set(
-      schemaScripts.flatMap((script) => {
-        try {
-          return schemaTypesOf(JSON.parse($(script).text()));
-        } catch {
-          return [];
-        }
-      }),
-    ),
-  ];
+  const schemaJson = schemaScripts.flatMap((script) => {
+    try {
+      return [JSON.parse($(script).text()) as unknown];
+    } catch {
+      return [];
+    }
+  });
+  const schemaTypes = [...new Set(schemaJson.flatMap((json) => schemaTypesOf(json)))];
+  const addressCountries = [...new Set(schemaJson.flatMap((json) => addressCountriesOf(json)))].slice(0, 10);
 
   // Before the text is read: removing <svg> would also strip a heading that is
   // an inline logo, exactly as on first-party pages.
@@ -352,7 +410,7 @@ function extractAudit(
   const content = normalizeContent($("body").text());
   const wordCount = countWords(content);
 
-  return {
+  const audit: CompetitorPageAudit = {
     url: loadedUrl,
     finalUrl: loadedUrl,
     isHttps: loaded.protocol === "https:",
@@ -373,5 +431,9 @@ function extractAudit(
     headings,
     schemaTypes,
     pageType: classifyPage({ url: loadedUrl, title, h1, schemaTypes, wordCount }).type,
+    language,
+    hreflang,
+    addressCountries,
   };
+  return { audit, links };
 }

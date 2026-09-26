@@ -6,6 +6,7 @@ import {
   AI_SITE_ANALYZE_JOB,
   AI_SITE_QUEUE,
   COMPETITOR_ANALYZE_ONE_JOB,
+  COMPETITOR_DISCOVER_JOB,
   COMPETITOR_QUEUE,
   CRAWL_HOMEPAGE_JOB,
   CRAWL_PAGE_JOB,
@@ -17,6 +18,7 @@ import {
   type AiPageAnalyzeJob,
   type AiSiteAnalyzeJob,
   type CompetitorAnalyzeOneJob,
+  type CompetitorDiscoverJob,
   type CrawlPageJob,
   type DiscoverSiteJob,
 } from "@seo-maker/core/queue";
@@ -27,6 +29,7 @@ import { aiAnalyzePageJob } from "./jobs/ai/analyze-page.js";
 import { aiAnalyzeSiteJob } from "./jobs/ai/analyze-site.js";
 import { aiCompetitorInsightJob } from "./jobs/ai/competitor-insight.js";
 import { competitorAnalyzeOneJob } from "./jobs/competitors/analyze-one.js";
+import { competitorDiscoverJob } from "./jobs/competitors/discover.js";
 import { crawlPageJob } from "./jobs/crawl-page";
 import { crawlHomepageJob, recoverInterruptedCrawls, type CrawlHomepageJob } from "./jobs/crawl-site";
 import { discoverSiteJob } from "./jobs/discover-site";
@@ -42,6 +45,17 @@ const recovered = await recoverInterruptedCrawls().catch((error) => {
 });
 if (recovered > 0) {
   console.log(`Marked ${recovered} interrupted crawl(s) as failed.`);
+}
+// A discovery run is never retried by BullMQ, so one a stopped worker left
+// "running" would show progress forever. Nothing runs yet at startup.
+const interruptedDiscoveries = await prisma.project
+  .updateMany({
+    where: { compStatus: "running" },
+    data: { compStatus: "failed", compPhase: null, compError: "Interrupted: the worker stopped during competitor discovery. Run it again." },
+  })
+  .catch(() => ({ count: 0 }));
+if (interruptedDiscoveries.count > 0) {
+  console.log(`Marked ${interruptedDiscoveries.count} interrupted competitor discovery run(s) as failed.`);
 }
 // Usage reservations whose job never reported back stop counting after their
 // TTL anyway; this records it, so the ledger explains itself.
@@ -98,9 +112,17 @@ crawlWorker.on("failed", (job, error) => {
  * crawls and PageSpeed jobs behind it. Longer lock: N competitors x M pages
  * comfortably exceeds the 15 minute crawl lock.
  */
-const competitorWorker = new Worker<CompetitorAnalyzeOneJob>(
+const competitorWorker = new Worker<CompetitorAnalyzeOneJob | CompetitorDiscoverJob>(
   COMPETITOR_QUEUE,
   async (job) => {
+    if (job.name === COMPETITOR_DISCOVER_JOB) {
+      const payload = job.data as CompetitorDiscoverJob;
+      console.log(`Competitor discovery ${job.id}: ${payload.projectId}`);
+      const result = await competitorDiscoverJob(payload);
+      console.log(`Competitor discovery ${job.id}: ${result?.outcome ?? "did not finish"}`);
+      return;
+    }
+
     if (job.name === COMPETITOR_ANALYZE_ONE_JOB) {
       const payload = job.data as CompetitorAnalyzeOneJob;
       console.log(`Competitor ${job.id}: analyzing ${payload.competitorId}`);

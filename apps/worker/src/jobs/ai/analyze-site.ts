@@ -19,6 +19,7 @@
 import {
   SITE_PROMPT_OPPORTUNITIES,
   applySiteOpportunityWording,
+  generateSearchQueries,
   planForProject,
   runAiFeature,
   siteOpportunitySpec,
@@ -39,6 +40,23 @@ export async function aiAnalyzeSiteJob(job: AiSiteAnalyzeJob, signal?: AbortSign
 
 async function analyze(job: AiSiteAnalyzeJob, outcomes: GenerationOutcome[], signal?: AbortSignal): Promise<void> {
   const task = job.task ?? "opportunities";
+
+  // Search keywords come from the business profile, not the crawl, so they
+  // need no complete crawl. The same generator automatic discovery uses.
+  if (task === "search-queries") {
+    const result = await generateSearchQueries({ projectId: job.projectId, force: job.force, signal });
+    if (result.status === "ok") {
+      outcomes.push({ status: result.cached ? "cached" : "generated" });
+      console.log(`AI search queries ${job.projectId}: ${result.queries.length}${result.cached ? " (cached)" : ""}`);
+    } else if (result.status === "profile-required") {
+      outcomes.push({ status: "skipped", reason: "business profile incomplete" });
+    } else {
+      if (result.error?.kind !== "cancelled") console.warn(`AI search queries ${job.projectId}: ${result.message}`);
+      outcomes.push(result.error?.kind === "cancelled" ? { status: "cancelled" } : { status: "failed", reason: result.error?.kind ?? result.message });
+    }
+    return;
+  }
+
   const synced = await syncSiteOpportunities(job.projectId);
   if (!synced) {
     console.warn(`AI site ${job.projectId}: no complete crawl yet, skipping.`);
